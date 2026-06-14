@@ -1,0 +1,456 @@
+Option Explicit
+
+' =========================================================
+' TradeLookup(tenor列, risk列, trade名, [tenorwide], [FullGrid])
+'
+' 例:
+'   =TradeLookup($A$2:$A$20,$B$2:$B$20,"2s5s")
+'       -> 2y, 5y のBPVだけを縦ベクトルで返す
+'
+'   =TradeLookup($A$2:$A$20,$B$2:$B$20,"2s5s7s",0.5)
+'       -> 1.5y, 2y, 4.5y, 5y, 6.5y, 7y のBPVを返す
+'
+'   =TradeLookup($A$2:$A$20,$B$2:$B$20,"2s5s7s",1)
+'       -> 1y, 2y, 4y, 5y, 6y, 7y のBPVを返す
+'
+'   =TradeLookup($A$2:$A$20,$B$2:$B$20,"2s5s7s",1,TRUE)
+'       -> 元のtenor列と同じ長さで、対象外は0
+'
+' tenor列:
+'   1, 2, 3, 4, 5 のような数値は 1y, 2y, 3y... と解釈
+'   1y, 2y, 1.5y, 3m, 6m なども可能
+'
+' trade名:
+'   2s5s, 2s5s7s, 5y, 3m6m など
+'   s は y と同じく「年」として扱う
+'
+' tenorwide:
+'   年単位で指定
+'   1   = 1年分、前方向に広げる
+'   0.5 = 半年分、前方向に広げる
+'   0   = 広げない
+'
+' 注意:
+'   この関数は既存のtenor列にあるBPVを抽出するだけ。
+'   補間はしない。
+' =========================================================
+Public Function TradeLookup( _
+    ByVal TenorRange As Range, _
+    ByVal RiskRange As Range, _
+    ByVal TradeName As Variant, _
+    Optional ByVal TenorWide As Variant = 0, _
+    Optional ByVal FullGrid As Boolean = False _
+) As Variant
+
+    On Error GoTo ErrHandler
+
+    Dim nTenor As Long
+    Dim nRisk As Long
+
+    nTenor = TenorRange.Cells.count
+    nRisk = RiskRange.Cells.count
+
+    If nTenor <> nRisk Then
+        TradeLookup = CVErr(xlErrValue)
+        Exit Function
+    End If
+
+    ' 旧仕様との互換性:
+    ' 以前の第4引数 FullGrid=TRUE を入れていた場合、
+    ' TRUEをtenorwideではなくFullGridとして扱う
+    If VarType(TenorWide) = vbBoolean Then
+        FullGrid = CBool(TenorWide)
+        TenorWide = 0
+    End If
+
+    Dim wideMonths As Double
+    wideMonths = TL_TenorWideToMonths(TenorWide)
+
+    If wideMonths < 0 Then
+        TradeLookup = CVErr(xlErrValue)
+        Exit Function
+    End If
+
+    Dim legs As Collection
+    Set legs = TL_ParseTradeLegs(CStr(TradeName))
+
+    If legs.count = 0 Then
+        TradeLookup = CVErr(xlErrValue)
+        Exit Function
+    End If
+
+    Dim riskDict As Object
+    Set riskDict = CreateObject("Scripting.Dictionary")
+
+    Dim i As Long
+    Dim tMonth As Double
+    Dim key As String
+    Dim r As Variant
+
+    ' tenor -> risk の辞書を作成
+    For i = 1 To nTenor
+        tMonth = TL_TenorToMonthNumber(TenorRange.Cells(i).value)
+
+        If tMonth >= 0 Then
+            key = TL_MonthKey(tMonth)
+            r = RiskRange.Cells(i).value
+
+            If IsNumeric(r) Then
+                riskDict(key) = CDbl(r)
+            End If
+        End If
+    Next i
+
+    ' tradeの中心tenor自体が存在するか確認
+    Dim legMonth As Double
+    Dim legKey As String
+
+    For i = 1 To legs.count
+        legMonth = TL_TenorToMonthNumber(legs(i))
+
+        If legMonth < 0 Then
+            TradeLookup = CVErr(xlErrValue)
+            Exit Function
+        End If
+
+        legKey = TL_MonthKey(legMonth)
+
+        If Not riskDict.Exists(legKey) Then
+            TradeLookup = CVErr(xlErrNA)
+            Exit Function
+        End If
+    Next i
+
+    If FullGrid = False Then
+        TradeLookup = TL_CompactOutput(TenorRange, RiskRange, legs, wideMonths)
+    Else
+        TradeLookup = TL_FullGridOutput(TenorRange, RiskRange, legs, wideMonths)
+    End If
+
+    Exit Function
+
+ErrHandler:
+    TradeLookup = CVErr(xlErrValue)
+
+End Function
+
+
+' ---------------------------------------------------------
+' コンパクト出力
+'
+' tradeに含まれるtenor、および tenorwide で広げたtenorだけを返す
+'
+' 例:
+'   trade = 2s5s7s, tenorwide = 0.5
+'   -> 1.5y, 2y, 4.5y, 5y, 6.5y, 7y のBPV
+' ---------------------------------------------------------
+Private Function TL_CompactOutput( _
+    ByVal TenorRange As Range, _
+    ByVal RiskRange As Range, _
+    ByVal legs As Collection, _
+    ByVal wideMonths As Double _
+) As Variant
+
+    Dim values As New Collection
+    Dim added As Object
+    Set added = CreateObject("Scripting.Dictionary")
+
+    Dim n As Long
+    n = TenorRange.Cells.count
+
+    Dim i As Long
+    Dim j As Long
+    Dim legMonth As Double
+    Dim lowerMonth As Double
+    Dim tMonth As Double
+    Dim key As String
+
+    For i = 1 To legs.count
+
+        legMonth = TL_TenorToMonthNumber(legs(i))
+        lowerMonth = legMonth - wideMonths
+
+        If lowerMonth < 0 Then lowerMonth = 0
+
+        For j = 1 To n
+
+            tMonth = TL_TenorToMonthNumber(TenorRange.Cells(j).value)
+
+            If tMonth >= 0 Then
+
+                If tMonth >= lowerMonth - 0.000001 And tMonth <= legMonth + 0.000001 Then
+
+                    key = TL_MonthKey(tMonth)
+
+                    ' 重複抽出を防ぐ
+                    If Not added.Exists(key) Then
+                        values.Add RiskRange.Cells(j).value
+                        added(key) = True
+                    End If
+
+                End If
+
+            End If
+
+        Next j
+
+    Next i
+
+    If values.count = 0 Then
+        TL_CompactOutput = CVErr(xlErrNA)
+        Exit Function
+    End If
+
+    Dim outArr() As Variant
+    ReDim outArr(1 To values.count, 1 To 1)
+
+    For i = 1 To values.count
+        outArr(i, 1) = values(i)
+    Next i
+
+    TL_CompactOutput = outArr
+
+End Function
+
+
+' ---------------------------------------------------------
+' FullGrid出力
+'
+' 元のtenor列と同じ長さで返す
+' 対象tenorならrisk、対象外なら0
+' ---------------------------------------------------------
+Private Function TL_FullGridOutput( _
+    ByVal TenorRange As Range, _
+    ByVal RiskRange As Range, _
+    ByVal legs As Collection, _
+    ByVal wideMonths As Double _
+) As Variant
+
+    Dim n As Long
+    n = TenorRange.Cells.count
+
+    Dim outArr() As Variant
+    ReDim outArr(1 To n, 1 To 1)
+
+    Dim i As Long
+    Dim j As Long
+    Dim tMonth As Double
+    Dim legMonth As Double
+    Dim lowerMonth As Double
+    Dim isSelected As Boolean
+
+    For i = 1 To n
+
+        tMonth = TL_TenorToMonthNumber(TenorRange.Cells(i).value)
+        isSelected = False
+
+        If tMonth >= 0 Then
+
+            For j = 1 To legs.count
+
+                legMonth = TL_TenorToMonthNumber(legs(j))
+                lowerMonth = legMonth - wideMonths
+
+                If lowerMonth < 0 Then lowerMonth = 0
+
+                If tMonth >= lowerMonth - 0.000001 And tMonth <= legMonth + 0.000001 Then
+                    isSelected = True
+                    Exit For
+                End If
+
+            Next j
+
+        End If
+
+        If isSelected Then
+            outArr(i, 1) = RiskRange.Cells(i).value
+        Else
+            outArr(i, 1) = 0
+        End If
+
+    Next i
+
+    TL_FullGridOutput = outArr
+
+End Function
+
+
+' ---------------------------------------------------------
+' tenorwide を月数に変換する
+'
+' 数値の場合:
+'   1   -> 12か月
+'   0.5 -> 6か月
+'
+' 文字列の場合:
+'   6m  -> 6か月
+'   1y  -> 12か月
+' ---------------------------------------------------------
+Private Function TL_TenorWideToMonths(ByVal v As Variant) As Double
+
+    On Error GoTo ErrHandler
+
+    If IsMissing(v) Or Trim$(CStr(v)) = "" Then
+        TL_TenorWideToMonths = 0
+        Exit Function
+    End If
+
+    If IsNumeric(v) Then
+        TL_TenorWideToMonths = CDbl(v) * 12
+        Exit Function
+    End If
+
+    TL_TenorWideToMonths = TL_TenorToMonthNumber(v)
+    Exit Function
+
+ErrHandler:
+    TL_TenorWideToMonths = -1
+
+End Function
+
+
+' ---------------------------------------------------------
+' tenor文字列を月数に変換する
+'
+' 例:
+'   1      -> 12
+'   1y     -> 12
+'   1s     -> 12
+'   5s     -> 60
+'   1.5y   -> 18
+'   3m     -> 3
+'   6m     -> 6
+' ---------------------------------------------------------
+Private Function TL_TenorToMonthNumber(ByVal v As Variant) As Double
+
+    On Error GoTo ErrHandler
+
+    Dim s As String
+    s = LCase$(Trim$(CStr(v)))
+
+    If s = "" Then
+        TL_TenorToMonthNumber = -1
+        Exit Function
+    End If
+
+    s = Replace(s, " ", "")
+    s = Replace(s, "年", "y")
+    s = Replace(s, "月", "m")
+    s = Replace(s, "yrs", "y")
+    s = Replace(s, "yr", "y")
+    s = Replace(s, "years", "y")
+    s = Replace(s, "year", "y")
+    s = Replace(s, "months", "m")
+    s = Replace(s, "month", "m")
+
+    Dim unitChar As String
+    Dim numPart As String
+
+    unitChar = Right$(s, 1)
+
+    If unitChar = "y" Or unitChar = "s" Or unitChar = "m" Then
+        numPart = Left$(s, Len(s) - 1)
+    Else
+        ' 単位なしの場合は年として扱う
+        unitChar = "y"
+        numPart = s
+    End If
+
+    If Not IsNumeric(numPart) Then
+        TL_TenorToMonthNumber = -1
+        Exit Function
+    End If
+
+    Dim x As Double
+    x = CDbl(numPart)
+
+    If unitChar = "m" Then
+        TL_TenorToMonthNumber = x
+    Else
+        TL_TenorToMonthNumber = x * 12
+    End If
+
+    Exit Function
+
+ErrHandler:
+    TL_TenorToMonthNumber = -1
+
+End Function
+
+
+' ---------------------------------------------------------
+' 月数を辞書キー用の文字列に変換
+' 小数誤差を避けるため、6桁で丸める
+' ---------------------------------------------------------
+Private Function TL_MonthKey(ByVal monthNumber As Double) As String
+    TL_MonthKey = CStr(Round(monthNumber, 6))
+End Function
+
+
+' ---------------------------------------------------------
+' trade名をlegに分解する
+'
+' 例:
+'   2s5s       -> 2s, 5s
+'   2s5s7s     -> 2s, 5s, 7s
+'   5y         -> 5y
+'   3m6m       -> 3m, 6m
+'   1.5s2s     -> 1.5s, 2s
+' ---------------------------------------------------------
+Private Function TL_ParseTradeLegs(ByVal tradeText As String) As Collection
+
+    Dim legs As New Collection
+
+    Dim s As String
+    s = LCase$(Trim$(tradeText))
+
+    s = Replace(s, " ", "")
+    s = Replace(s, "-", "")
+    s = Replace(s, "_", "")
+    s = Replace(s, "/", "")
+
+    If s = "" Then
+        Set TL_ParseTradeLegs = legs
+        Exit Function
+    End If
+
+    Dim re As Object
+    Set re = CreateObject("VBScript.RegExp")
+
+    With re
+        .Global = True
+        .IgnoreCase = True
+        .Pattern = "([0-9]+(?:\.[0-9]+)?)([smy]?)"
+    End With
+
+    Dim matches As Object
+    Set matches = re.Execute(s)
+
+    Dim m As Object
+    Dim numPart As String
+    Dim unitPart As String
+    Dim rebuilt As String
+
+    rebuilt = ""
+
+    For Each m In matches
+        numPart = m.SubMatches(0)
+        unitPart = m.SubMatches(1)
+
+        If unitPart = "" Then
+            unitPart = "s"
+        End If
+
+        legs.Add numPart & unitPart
+        rebuilt = rebuilt & m.value
+    Next m
+
+    ' 解釈不能な文字が混じっていた場合はエラー扱い
+    If rebuilt <> s Then
+        Set legs = New Collection
+    End If
+
+    Set TL_ParseTradeLegs = legs
+
+End Function
+

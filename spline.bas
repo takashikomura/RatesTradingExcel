@@ -99,6 +99,11 @@ End Function
 
 ' ============================================================
 ' 2. Public UDF: MofSpline
+'
+' 既存の4列範囲入力版。
+'
+' 使用例:
+'   =MofSpline(Ticker列, 満期列, クーポン列, 複利利回り列, 10, 基準日, FALSE, TRUE)
 ' ============================================================
 
 Public Function MofSpline( _
@@ -139,8 +144,8 @@ Public Function MofSpline( _
 
     Dim x() As Double
     Dim y() As Double
-    Dim Cpn() As Double
-    Dim Iss() As Long
+    Dim nodeCoupon() As Double
+    Dim nodeIssue() As Long
 
     ' -----------------------------
     ' 入力範囲チェック
@@ -358,8 +363,8 @@ Public Function MofSpline( _
 
     ReDim x(1 To m)
     ReDim y(1 To m)
-    ReDim Cpn(1 To m)
-    ReDim Iss(1 To m)
+    ReDim nodeCoupon(1 To m)
+    ReDim nodeIssue(1 To m)
 
     j = 0
 
@@ -370,15 +375,15 @@ Public Function MofSpline( _
 
             x(j) = matYears(i)
             y(j) = compYield(i)
-            Cpn(j) = coupon(i)
-            Iss(j) = issueNo(i)
+            nodeCoupon(j) = coupon(i)
+            nodeIssue(j) = issueNo(i)
         End If
 
     Next i
 
-    Call SortSplineNodes(x, y, Cpn, Iss, m)
+    Call SortSplineNodes(x, y, nodeCoupon, nodeIssue, m)
 
-    m = CompressDuplicateMaturities(x, y, Cpn, Iss, m)
+    m = CompressDuplicateMaturities(x, y, nodeCoupon, nodeIssue, m)
 
     If m < 3 Then
         MofSpline = SplineError(xlErrValue, _
@@ -386,10 +391,6 @@ Public Function MofSpline( _
             ShowErrorMessage)
         Exit Function
     End If
-
-    ' -----------------------------
-    ' 共通スプライン計算エンジンを再利用
-    ' -----------------------------
 
     MofSpline = NaturalCubicSplineFromArrays( _
         x, y, m, xq, AllowExtrapolate, ShowErrorMessage)
@@ -405,7 +406,152 @@ End Function
 
 
 ' ============================================================
-' 3. Optional: UDF help registration
+' 3. Public UDF: MOFSplineTable
+'
+' ヘッダー付きの名前付き範囲・通常範囲を直接受け取る版。
+'
+' 使用例:
+'   =MOFSplineTable(pastetable,10,$C$3,FALSE,TRUE)
+'
+' DataRange:
+'   ヘッダー行を含む範囲。
+'
+' 必須カラム:
+'   Ticker
+'   Maturity
+'   Cpn(%) / Coupon
+'   CY(%) / CompoundYield
+'
+' 不完全な行は無視する。
+' ============================================================
+
+Public Function MOFSplineTable( _
+    ByVal DataRange As Range, _
+    ByVal TargetMaturity As Variant, _
+    Optional ByVal AsOfDate As Variant, _
+    Optional ByVal AllowExtrapolate As Boolean = False, _
+    Optional ByVal ShowErrorMessage As Boolean = False, _
+    Optional ByVal HeaderRowIndex As Long = 1 _
+) As Variant
+
+    On Error GoTo ErrHandler
+
+    Application.Volatile True
+
+    If DataRange Is Nothing Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange が指定されていません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If DataRange.Areas.count <> 1 Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange は単一エリアで指定してください。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If DataRange.rows.count < 2 Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange にはヘッダー行とデータ行が必要です。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If HeaderRowIndex < 1 Or HeaderRowIndex >= DataRange.rows.count Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "HeaderRowIndex が不正です。ヘッダー行とデータ行を含む範囲を指定してください。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    Dim idxTicker As Long
+    Dim idxMaturity As Long
+    Dim idxCoupon As Long
+    Dim idxYield As Long
+
+    idxTicker = MNB_FindColumnIndex( _
+        DataRange, HeaderRowIndex, _
+        "Ticker", "TickerRange", "銘柄", "銘柄コード", "ティッカー", "コード")
+
+    idxMaturity = MNB_FindColumnIndex( _
+        DataRange, HeaderRowIndex, _
+        "Maturity", "MaturityRange", "MaturityDate", _
+        "満期", "満期日", "償還日", "償還年月日", "残存年数")
+
+    idxCoupon = MNB_FindColumnIndex( _
+        DataRange, HeaderRowIndex, _
+        "Coupon", "CouponRange", "CouponRate", _
+        "Cpn", "Cpn%", "Cpn(%)", _
+        "クーポン", "表面利率", "利率", "利率%")
+
+    idxYield = MNB_FindColumnIndex( _
+        DataRange, HeaderRowIndex, _
+        "CompoundYield", "CompoundYieldRange", "CompoundYieldYtm", _
+        "CY", "CY%", "CY(%)", _
+        "複利", "複利利回り", "複利利回", "複利利回り%")
+
+    If idxTicker = 0 Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange 内に Ticker 列が見つかりません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If idxMaturity = 0 Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange 内に Maturity 列が見つかりません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If idxCoupon = 0 Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange 内に Coupon / Cpn(%) 列が見つかりません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If idxYield = 0 Then
+        MOFSplineTable = SplineError(xlErrValue, _
+            "DataRange 内に CompoundYield / CY(%) 列が見つかりません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    Dim AsOfValue As Variant
+
+    If IsMissing(AsOfDate) Then
+        AsOfValue = Empty
+    Else
+        AsOfValue = AsOfDate
+    End If
+
+    MOFSplineTable = MNB_MofSplineCoreFromBlock( _
+        DataRange, _
+        HeaderRowIndex, _
+        idxTicker, _
+        idxMaturity, _
+        idxCoupon, _
+        idxYield, _
+        TargetMaturity, _
+        AsOfValue, _
+        AllowExtrapolate, _
+        ShowErrorMessage)
+
+    Exit Function
+
+ErrHandler:
+    MOFSplineTable = SplineError(xlErrValue, _
+        "MOFSplineTable 実行中のVBAエラー: " & Err.Description, _
+        ShowErrorMessage)
+
+End Function
+
+
+' ============================================================
+' 4. Optional: UDF help registration
 ' ============================================================
 
 Public Sub RegisterSplineUdfHelp()
@@ -437,11 +583,24 @@ Public Sub RegisterSplineUdfHelp()
             "省略可能。TRUEならExcelエラーではなくエラー原因を文字列で返します。" _
         )
 
+    Application.MacroOptions _
+        Macro:="MOFSplineTable", _
+        Description:="ヘッダー付き範囲からTicker・Maturity・Cpn/Coupon・CY/CompoundYield列を自動検出し、不完全行を無視してMOF風スプラインを計算します。", _
+        Category:="JGB Analytics", _
+        ArgumentDescriptions:=Array( _
+            "ヘッダー行を含むデータ範囲です。名前付き範囲 pastetable などを指定できます。", _
+            "補間したい年限または日付。例: 10, 15.5, DATE(2035,9,20)", _
+            "省略可能。基準日。省略時は今日を使用します。", _
+            "省略可能。TRUEなら外挿を許可します。省略時はFALSEです。", _
+            "省略可能。TRUEならExcelエラーではなくエラー原因を文字列で返します。", _
+            "省略可能。ヘッダー行が範囲内の何行目かを指定します。省略時は1です。" _
+        )
+
 End Sub
 
 
 ' ============================================================
-' 4. Shared helpers
+' 5. Shared helpers
 ' ============================================================
 
 Private Function SplineError( _
@@ -668,7 +827,7 @@ End Function
 
 
 ' ============================================================
-' 5. Date and maturity helpers
+' 6. Date and maturity helpers
 ' ============================================================
 
 Private Function DateValueToSerial( _
@@ -740,15 +899,15 @@ End Function
 
 
 ' ============================================================
-' 6. Ticker helpers
+' 7. Ticker helpers
 ' ============================================================
 
-Private Function MofTermClassFromTicker(ByVal Ticker As String) As Long
+Private Function MofTermClassFromTicker(ByVal ticker As String) As Long
 
     Dim s As String
     Dim p As String
 
-    s = UCase$(Trim$(Ticker))
+    s = UCase$(Trim$(ticker))
     p = TickerPrefix(s)
 
     Select Case p
@@ -779,25 +938,25 @@ Private Function MofTermClassFromTicker(ByVal Ticker As String) As Long
 End Function
 
 
-Private Function TickerPrefix(ByVal Ticker As String) As String
+Private Function TickerPrefix(ByVal ticker As String) As String
 
     Dim i As Long
 
-    For i = 1 To Len(Ticker)
+    For i = 1 To Len(ticker)
 
-        If mid$(Ticker, i, 1) Like "#" Then
-            TickerPrefix = Left$(Ticker, i - 1)
+        If mid$(ticker, i, 1) Like "#" Then
+            TickerPrefix = Left$(ticker, i - 1)
             Exit Function
         End If
 
     Next i
 
-    TickerPrefix = Ticker
+    TickerPrefix = ticker
 
 End Function
 
 
-Private Function IssueNumberFromTicker(ByVal Ticker As String) As Long
+Private Function IssueNumberFromTicker(ByVal ticker As String) As Long
 
     Dim i As Long
     Dim ch As String
@@ -805,9 +964,9 @@ Private Function IssueNumberFromTicker(ByVal Ticker As String) As Long
 
     digits = ""
 
-    For i = Len(Ticker) To 1 Step -1
+    For i = Len(ticker) To 1 Step -1
 
-        ch = mid$(Ticker, i, 1)
+        ch = mid$(ticker, i, 1)
 
         If ch Like "#" Then
             digits = ch & digits
@@ -827,7 +986,7 @@ End Function
 
 
 ' ============================================================
-' 7. MOF grid mapping
+' 8. MOF grid mapping
 ' ============================================================
 
 Private Function MofTermClassForGrid(ByVal GridYear As Long) As Long
@@ -850,7 +1009,7 @@ End Function
 
 
 ' ============================================================
-' 8. MOF issue selection helpers
+' 9. MOF issue selection helpers
 ' ============================================================
 
 Private Sub SelectCurrentIssue( _
@@ -1005,14 +1164,14 @@ End Function
 
 
 ' ============================================================
-' 9. Node sorting and duplicate compression
+' 10. Node sorting and duplicate compression
 ' ============================================================
 
 Private Sub SortSplineNodes( _
     ByRef x() As Double, _
     ByRef y() As Double, _
-    ByRef Cpn() As Double, _
-    ByRef Iss() As Long, _
+    ByRef nodeCoupon() As Double, _
+    ByRef nodeIssue() As Long, _
     ByVal n As Long _
 )
 
@@ -1021,15 +1180,15 @@ Private Sub SortSplineNodes( _
 
     Dim keyX As Double
     Dim keyY As Double
-    Dim keyCpn As Double
-    Dim keyIss As Long
+    Dim keyCoupon As Double
+    Dim keyIssue As Long
 
     For i = 2 To n
 
         keyX = x(i)
         keyY = y(i)
-        keyCpn = Cpn(i)
-        keyIss = Iss(i)
+        keyCoupon = nodeCoupon(i)
+        keyIssue = nodeIssue(i)
 
         j = i - 1
 
@@ -1037,8 +1196,8 @@ Private Sub SortSplineNodes( _
 
             x(j + 1) = x(j)
             y(j + 1) = y(j)
-            Cpn(j + 1) = Cpn(j)
-            Iss(j + 1) = Iss(j)
+            nodeCoupon(j + 1) = nodeCoupon(j)
+            nodeIssue(j + 1) = nodeIssue(j)
 
             j = j - 1
 
@@ -1046,8 +1205,8 @@ Private Sub SortSplineNodes( _
 
         x(j + 1) = keyX
         y(j + 1) = keyY
-        Cpn(j + 1) = keyCpn
-        Iss(j + 1) = keyIss
+        nodeCoupon(j + 1) = keyCoupon
+        nodeIssue(j + 1) = keyIssue
 
     Next i
 
@@ -1057,8 +1216,8 @@ End Sub
 Private Function CompressDuplicateMaturities( _
     ByRef x() As Double, _
     ByRef y() As Double, _
-    ByRef Cpn() As Double, _
-    ByRef Iss() As Long, _
+    ByRef nodeCoupon() As Double, _
+    ByRef nodeIssue() As Long, _
     ByVal n As Long _
 ) As Long
 
@@ -1073,13 +1232,13 @@ Private Function CompressDuplicateMaturities( _
 
         If Abs(x(i) - x(m)) <= EPS Then
 
-            If Cpn(i) > Cpn(m) + EPS _
-                Or (Abs(Cpn(i) - Cpn(m)) <= EPS And Iss(i) > Iss(m)) Then
+            If nodeCoupon(i) > nodeCoupon(m) + EPS _
+                Or (Abs(nodeCoupon(i) - nodeCoupon(m)) <= EPS And nodeIssue(i) > nodeIssue(m)) Then
 
                 x(m) = x(i)
                 y(m) = y(i)
-                Cpn(m) = Cpn(i)
-                Iss(m) = Iss(i)
+                nodeCoupon(m) = nodeCoupon(i)
+                nodeIssue(m) = nodeIssue(i)
 
             End If
 
@@ -1090,8 +1249,8 @@ Private Function CompressDuplicateMaturities( _
             If m <> i Then
                 x(m) = x(i)
                 y(m) = y(i)
-                Cpn(m) = Cpn(i)
-                Iss(m) = Iss(i)
+                nodeCoupon(m) = nodeCoupon(i)
+                nodeIssue(m) = nodeIssue(i)
             End If
 
         End If
@@ -1099,6 +1258,385 @@ Private Function CompressDuplicateMaturities( _
     Next i
 
     CompressDuplicateMaturities = m
+
+End Function
+
+
+' ============================================================
+' 11. MOFSplineTable helpers
+' ============================================================
+
+Private Function MNB_FindColumnIndex( _
+    ByVal rng As Range, _
+    ByVal HeaderRowIndex As Long, _
+    ParamArray Aliases() As Variant _
+) As Long
+
+    Dim c As Long
+    Dim a As Long
+    Dim headerName As String
+    Dim aliasName As String
+
+    For c = 1 To rng.Columns.count
+
+        headerName = MNB_NormalizeHeader(rng.Cells(HeaderRowIndex, c).Value2)
+
+        For a = LBound(Aliases) To UBound(Aliases)
+
+            aliasName = MNB_NormalizeHeader(CStr(Aliases(a)))
+
+            If headerName = aliasName Then
+                MNB_FindColumnIndex = c
+                Exit Function
+            End If
+
+        Next a
+
+    Next c
+
+    MNB_FindColumnIndex = 0
+
+End Function
+
+
+Private Function MNB_NormalizeHeader(ByVal v As Variant) As String
+
+    Dim s As String
+
+    If IsError(v) Or IsEmpty(v) Then
+        MNB_NormalizeHeader = ""
+        Exit Function
+    End If
+
+    s = LCase$(Trim$(CStr(v)))
+
+    s = Replace(s, " ", "")
+    s = Replace(s, "　", "")
+    s = Replace(s, "_", "")
+    s = Replace(s, "-", "")
+    s = Replace(s, "－", "")
+    s = Replace(s, "(", "")
+    s = Replace(s, ")", "")
+    s = Replace(s, "（", "")
+    s = Replace(s, "）", "")
+    s = Replace(s, "%", "")
+
+    MNB_NormalizeHeader = s
+
+End Function
+
+
+Private Function MNB_MofSplineCoreFromBlock( _
+    ByVal rng As Range, _
+    ByVal HeaderRowIndex As Long, _
+    ByVal idxTicker As Long, _
+    ByVal idxMaturity As Long, _
+    ByVal idxCoupon As Long, _
+    ByVal idxYield As Long, _
+    ByVal TargetMaturity As Variant, _
+    ByVal AsOfValue As Variant, _
+    Optional ByVal AllowExtrapolate As Boolean = False, _
+    Optional ByVal ShowErrorMessage As Boolean = False _
+) As Variant
+
+    On Error GoTo ErrHandler
+
+    Dim AsOfSerial As Double
+    Dim ok As Boolean
+
+    If IsEmpty(AsOfValue) Then
+        AsOfSerial = CDbl(Date)
+    Else
+        AsOfSerial = DateValueToSerial(AsOfValue, ok)
+
+        If Not ok Then
+            MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+                "AsOfDate が日付として認識できません。", _
+                ShowErrorMessage)
+            Exit Function
+        End If
+    End If
+
+    Dim xq As Double
+    xq = MaturityToYears(TargetMaturity, AsOfSerial, ok)
+
+    If Not ok Then
+        MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+            "TargetMaturity が年限または日付として認識できません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    If xq <= 0# Then
+        MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+            "TargetMaturity は正の年限、またはAsOfDateより後の日付で指定してください。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    Dim rawCount As Long
+    rawCount = rng.rows.count - HeaderRowIndex
+
+    If rawCount < 1 Then
+        MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+            "DataRange にデータ行がありません。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    Dim tickers() As String
+    Dim issueNo() As Long
+    Dim originalTerm() As Long
+    Dim matYears() As Double
+    Dim coupon() As Double
+    Dim compYield() As Double
+    Dim selected() As Boolean
+
+    ReDim tickers(1 To rawCount)
+    ReDim issueNo(1 To rawCount)
+    ReDim originalTerm(1 To rawCount)
+    ReDim matYears(1 To rawCount)
+    ReDim coupon(1 To rawCount)
+    ReDim compYield(1 To rawCount)
+
+    Dim i As Long
+    Dim rowIndex As Long
+    Dim n As Long
+
+    Dim rowTicker As String
+    Dim rowTermClass As Long
+    Dim rowIssueNo As Long
+    Dim rowMatYears As Double
+    Dim rowCoupon As Double
+    Dim rowYield As Double
+
+    n = 0
+
+    For rowIndex = HeaderRowIndex + 1 To rng.rows.count
+
+        If MNB_TryReadMofInputRow( _
+            rng.Cells(rowIndex, idxTicker).Value2, _
+            rng.Cells(rowIndex, idxMaturity).Value2, _
+            rng.Cells(rowIndex, idxCoupon).Value2, _
+            rng.Cells(rowIndex, idxYield).Value2, _
+            AsOfSerial, _
+            rowTicker, rowTermClass, rowIssueNo, rowMatYears, rowCoupon, rowYield) Then
+
+            n = n + 1
+
+            tickers(n) = rowTicker
+            originalTerm(n) = rowTermClass
+            issueNo(n) = rowIssueNo
+            matYears(n) = rowMatYears
+            coupon(n) = rowCoupon
+            compYield(n) = rowYield
+
+        End If
+
+    Next rowIndex
+
+    If n < 3 Then
+        MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+            "有効なデータ行が3行未満です。空欄・不正値・満期到来済み行を除外した結果、データが不足しています。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    ReDim Preserve tickers(1 To n)
+    ReDim Preserve issueNo(1 To n)
+    ReDim Preserve originalTerm(1 To n)
+    ReDim Preserve matYears(1 To n)
+    ReDim Preserve coupon(1 To n)
+    ReDim Preserve compYield(1 To n)
+    ReDim selected(1 To n)
+
+    ' -----------------------------
+    ' 財務省方式に近い対象銘柄選定
+    ' -----------------------------
+
+    Call SelectCurrentIssue(selected, originalTerm, issueNo, n, 2)
+    Call SelectCurrentIssue(selected, originalTerm, issueNo, n, 5)
+    Call SelectCurrentIssue(selected, originalTerm, issueNo, n, 10)
+    Call SelectCurrentIssue(selected, originalTerm, issueNo, n, 20)
+    Call SelectCurrentIssue(selected, originalTerm, issueNo, n, 30)
+    Call SelectCurrentIssue(selected, originalTerm, issueNo, n, 40)
+
+    Dim grid As Long
+    Dim termCls As Long
+    Dim innerIdx As Long
+    Dim outerIdx As Long
+
+    For grid = 1 To 40
+
+        termCls = MofTermClassForGrid(grid)
+
+        innerIdx = FindNearestIssue( _
+            originalTerm, matYears, coupon, issueNo, _
+            n, termCls, CDbl(grid), -1)
+
+        outerIdx = FindNearestIssue( _
+            originalTerm, matYears, coupon, issueNo, _
+            n, termCls, CDbl(grid), 1)
+
+        If innerIdx > 0 Then selected(innerIdx) = True
+        If outerIdx > 0 Then selected(outerIdx) = True
+
+    Next grid
+
+    ' -----------------------------
+    ' 選定銘柄をスプラインノードへ変換
+    ' -----------------------------
+
+    Dim m As Long
+    m = 0
+
+    For i = 1 To n
+        If selected(i) Then m = m + 1
+    Next i
+
+    If m < 3 Then
+        MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+            "選定後の銘柄数が3未満です。対象データが不足しています。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    Dim x() As Double
+    Dim y() As Double
+    Dim nodeCoupon() As Double
+    Dim nodeIssue() As Long
+
+    ReDim x(1 To m)
+    ReDim y(1 To m)
+    ReDim nodeCoupon(1 To m)
+    ReDim nodeIssue(1 To m)
+
+    Dim j As Long
+    j = 0
+
+    For i = 1 To n
+
+        If selected(i) Then
+            j = j + 1
+
+            x(j) = matYears(i)
+            y(j) = compYield(i)
+            nodeCoupon(j) = coupon(i)
+            nodeIssue(j) = issueNo(i)
+
+        End If
+
+    Next i
+
+    Call SortSplineNodes(x, y, nodeCoupon, nodeIssue, m)
+
+    m = CompressDuplicateMaturities(x, y, nodeCoupon, nodeIssue, m)
+
+    If m < 3 Then
+        MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+            "重複残存年数を圧縮した結果、スプラインノードが3点未満になりました。", _
+            ShowErrorMessage)
+        Exit Function
+    End If
+
+    MNB_MofSplineCoreFromBlock = NaturalCubicSplineFromArrays( _
+        x, y, m, xq, AllowExtrapolate, ShowErrorMessage)
+
+    Exit Function
+
+ErrHandler:
+    MNB_MofSplineCoreFromBlock = SplineError(xlErrValue, _
+        "MOFSplineTable内部計算中のVBAエラー: " & Err.Description, _
+        ShowErrorMessage)
+
+End Function
+
+
+Private Function MNB_TryReadMofInputRow( _
+    ByVal TickerValue As Variant, _
+    ByVal MaturityValue As Variant, _
+    ByVal CouponValue As Variant, _
+    ByVal YieldValue As Variant, _
+    ByVal AsOfSerial As Double, _
+    ByRef TickerOut As String, _
+    ByRef OriginalTermOut As Long, _
+    ByRef IssueNoOut As Long, _
+    ByRef MatYearsOut As Double, _
+    ByRef CouponOut As Double, _
+    ByRef CompYieldOut As Double _
+) As Boolean
+
+    On Error GoTo BadRow
+
+    Dim ok As Boolean
+
+    ' Ticker
+    If IsError(TickerValue) _
+        Or IsEmpty(TickerValue) _
+        Or Trim$(CStr(TickerValue)) = "" Then
+
+        MNB_TryReadMofInputRow = False
+        Exit Function
+
+    End If
+
+    TickerOut = UCase$(Trim$(CStr(TickerValue)))
+
+    OriginalTermOut = MofTermClassFromTicker(TickerOut)
+
+    If OriginalTermOut = 0 Then
+        MNB_TryReadMofInputRow = False
+        Exit Function
+    End If
+
+    IssueNoOut = IssueNumberFromTicker(TickerOut)
+
+    If IssueNoOut < 0 Then
+        MNB_TryReadMofInputRow = False
+        Exit Function
+    End If
+
+    ' Maturity
+    MatYearsOut = MaturityToYears(MaturityValue, AsOfSerial, ok)
+
+    If Not ok Then
+        MNB_TryReadMofInputRow = False
+        Exit Function
+    End If
+
+    If MatYearsOut <= 0# Then
+        MNB_TryReadMofInputRow = False
+        Exit Function
+    End If
+
+    ' Coupon
+    If IsError(CouponValue) _
+        Or IsEmpty(CouponValue) _
+        Or Not IsNumeric(CouponValue) Then
+
+        MNB_TryReadMofInputRow = False
+        Exit Function
+
+    End If
+
+    ' Compound Yield
+    If IsError(YieldValue) _
+        Or IsEmpty(YieldValue) _
+        Or Not IsNumeric(YieldValue) Then
+
+        MNB_TryReadMofInputRow = False
+        Exit Function
+
+    End If
+
+    CouponOut = CDbl(CouponValue)
+    CompYieldOut = CDbl(YieldValue)
+
+    MNB_TryReadMofInputRow = True
+    Exit Function
+
+BadRow:
+    MNB_TryReadMofInputRow = False
 
 End Function
 

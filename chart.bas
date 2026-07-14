@@ -3,25 +3,24 @@ Option Explicit
 '===============================================================================
 ' TIME SERIES DASHBOARD
 '
-' Data sheet assumptions:
-'   Column A    : Date
+' Data sheet:
+'   Column A    : Dates
 '   Row 1       : Series names
 '   Column B... : Time-series values
 '
-' Dashboard layout:
+' Dashboard:
 '   Selectors       : A2:B7
 '   Controls        : A9:B12
 '   Chart           : C2:R19
 '   X Range         : C20:R20
 '   Period buttons  : C21:R21
 '
-' IMPORTANT:
-'   This code must be placed in a standard module.
-'   Do not name the module "Chart".
+' Place this code in a standard module.
+' Do not name the module "Chart".
 '===============================================================================
 
 '-------------------------------------------------------------------------------
-' Dashboard configuration
+' Main configuration
 '-------------------------------------------------------------------------------
 Private Const DASHBOARD_SHEET As String = "Chart"
 Private Const CHART_OUTPUT_RANGE As String = "C2:R19"
@@ -31,7 +30,7 @@ Private Const MAX_SERIES_COUNT As Long = 3
 Private Const NONE_SERIES_TEXT As String = "(None)"
 
 '-------------------------------------------------------------------------------
-' Visible selector cells
+' Visible input cells
 '-------------------------------------------------------------------------------
 Private Const CELL_DATA_SHEET_1 As String = "B2"
 Private Const CELL_SERIES_1 As String = "B3"
@@ -66,7 +65,7 @@ Private Const CELL_AXIS_MAX As String = "BJ13"
 Private Const CELL_PREVIOUS_WINDOW As String = "BJ14"
 
 '-------------------------------------------------------------------------------
-' Hidden helper data
+' Hidden helper columns
 '-------------------------------------------------------------------------------
 Private Const HELPER_DATE_COL As String = "AZ"
 Private Const HELPER_SERIES_1_COL As String = "BA"
@@ -84,7 +83,7 @@ Private Const NAME_SERIES_LIST_2 As String = "_TS_SeriesList2"
 Private Const NAME_SERIES_LIST_3 As String = "_TS_SeriesList3"
 
 '-------------------------------------------------------------------------------
-' Shape and control names
+' Shape names
 '-------------------------------------------------------------------------------
 Private Const CONTROL_X_RANGE As String = "ts_ctlXRange"
 
@@ -118,7 +117,7 @@ Private Const BUTTON_MAX As String = "ts_btnMax"
 Private Const BUTTON_AUTO_Y As String = "ts_btnAutoY"
 
 '-------------------------------------------------------------------------------
-' Window presets
+' Display-window presets
 '-------------------------------------------------------------------------------
 Private Const MIN_WINDOW_POINTS As Long = 5
 Private Const DEFAULT_WINDOW_POINTS As Long = 66
@@ -132,7 +131,7 @@ Private Const POINTS_3Y As Long = 792
 Private Const POINTS_5Y As Long = 1320
 
 '-------------------------------------------------------------------------------
-' Y-axis and marker settings
+' Y-axis and point settings
 '-------------------------------------------------------------------------------
 Private Const DEFAULT_Y_ZOOM As Long = 100
 Private Const Y_ZOOM_MIN As Long = 25
@@ -143,7 +142,7 @@ Private Const MARKER_SIZE_MIN As Long = 0
 Private Const MARKER_SIZE_MAX As Long = 12
 
 '===============================================================================
-' INITIAL SETUP
+' SETUP
 '===============================================================================
 Public Sub SetupTimeSeriesDashboard()
 
@@ -256,7 +255,7 @@ ErrHandler:
 End Sub
 
 '===============================================================================
-' RECALCULATE DATA AND REFRESH
+' UPDATE
 '===============================================================================
 Public Sub ReloadTimeSeriesDashboard()
 
@@ -376,8 +375,7 @@ Public Sub RefreshTimeSeriesDashboard()
     windowPoints = ClampLong( _
         windowPoints, _
         Application.WorksheetFunction.Min( _
-            MIN_WINDOW_POINTS, _
-            totalPoints), _
+            MIN_WINDOW_POINTS, totalPoints), _
         totalPoints)
 
     maximumStartIndex = Application.WorksheetFunction.Max( _
@@ -452,10 +450,9 @@ Public Sub RefreshTimeSeriesDashboard()
 
     ws.Range(CELL_AXIS_MIN).Value = niceAxisMin
     ws.Range(CELL_AXIS_MAX).Value = niceAxisMax
+    ws.Range(CELL_PREVIOUS_WINDOW).Value = windowPoints
 
     SaveCurrentSelectionState ws
-
-    ws.Range(CELL_PREVIOUS_WINDOW).Value = windowPoints
 
     UpdateXRangeStatus _
         ws:=ws, _
@@ -512,7 +509,7 @@ ErrHandler:
 End Sub
 
 '===============================================================================
-' SERIES SELECTION STATE
+' SELECTION STATE
 '===============================================================================
 Private Function HasSeriesSelectionChanged( _
     ByVal ws As Excel.Worksheet) As Boolean
@@ -579,14 +576,8 @@ End Sub
 '===============================================================================
 ' X ZOOM
 '
-' Minus:
-'   Reduces the number of displayed observations.
-'
-' Plus:
-'   Increases the number of displayed observations.
-'
-' The newest currently displayed index remains fixed.
-' Only the older-date boundary moves.
+' The newest currently displayed date remains fixed.
+' Only the older-date side changes.
 '===============================================================================
 Public Sub XZoomMinus()
 
@@ -650,6 +641,7 @@ Private Sub ApplyWindowAnchoredToLatest( _
     Dim ws As Excel.Worksheet
 
     Dim totalPoints As Long
+
     Dim oldStartIndex As Long
     Dim oldWindowPoints As Long
     Dim fixedEndIndex As Long
@@ -808,7 +800,7 @@ Private Sub AdjustPointSize(ByVal changeValue As Long)
 End Sub
 
 '===============================================================================
-' PERIOD PRESETS
+' PERIOD BUTTONS
 '===============================================================================
 Public Sub SetWindow1W()
     ApplyLatestWindow POINTS_1W
@@ -893,33 +885,25 @@ Private Sub ApplyLatestWindow(ByVal requestedPoints As Long)
 End Sub
 
 '===============================================================================
-' DASHBOARD LAYOUT
-'
-' Column widths and row heights are not modified.
+' LAYOUT
 '===============================================================================
 Private Sub BuildDashboardLayout(ByVal ws As Excel.Worksheet)
 
-    ' Remove old merged cells in the dashboard area.
     ws.Range("A1:R21").UnMerge
-
-    ' Remove cell values only.
     ws.Range("A1:R21").ClearContents
 
-    ' Remove values created by earlier versions of the dashboard.
+    ' Remove data left by older dashboard versions.
     ws.Range("Z1:AS5000").ClearContents
-    ws.Range("AB1:AE20").ClearContents
+    ws.Range("AZ1:BJ5000").ClearContents
 
-    ' Undo column hiding performed by older versions.
+    ' Restore columns hidden by older versions.
     ws.Columns("Z:AY").Hidden = False
 
-    ' Only the current helper/state area is hidden.
+    ' Hide only the current helper area.
     ws.Columns("AZ:BJ").Hidden = True
 
     ' Row 1 remains blank.
 
-    '---------------------------------------------------------------------------
-    ' Series selectors
-    '---------------------------------------------------------------------------
     ws.Range("A2").Value = "Data Sheet 1"
     ws.Range("A3").Value = "Series 1"
 
@@ -955,9 +939,6 @@ Private Sub BuildDashboardLayout(ByVal ws As Excel.Worksheet)
         target:=ws.Range("A2:B7"), _
         borderColor:=RGB(190, 190, 190)
 
-    '---------------------------------------------------------------------------
-    ' X range
-    '---------------------------------------------------------------------------
     ws.Range("C20:E20").Merge
 
     With ws.Range("C20")
@@ -1041,12 +1022,7 @@ Private Sub CreateXRangeScrollBar(ByVal ws As Excel.Worksheet)
 End Sub
 
 '===============================================================================
-' COMPACT CONTROLS IN A:B
-'
-' A9:B9   X Zoom
-' A10:B10 Y Zoom
-' A11:B11 Point Size
-' A12:B12 Update
+' CONTROLS IN A:B
 '===============================================================================
 Private Sub CreateCompactControls(ByVal ws As Excel.Worksheet)
 
@@ -1236,7 +1212,7 @@ Private Sub AddControlLabel( _
 End Sub
 
 '===============================================================================
-' PERIOD BUTTONS ON ROW 21
+' PERIOD BUTTONS
 '===============================================================================
 Private Sub CreatePeriodButtons(ByVal ws As Excel.Worksheet)
 
@@ -1254,36 +1230,18 @@ Private Sub CreatePeriodButtons(ByVal ws As Excel.Worksheet)
     Set target = ws.Range("C21:R21")
 
     captions = Array( _
-        "1W", _
-        "1M", _
-        "3M", _
-        "6M", _
-        "1Y", _
-        "3Y", _
-        "5Y", _
-        "MAX", _
-        "AUTO Y")
+        "1W", "1M", "3M", "6M", "1Y", _
+        "3Y", "5Y", "MAX", "AUTO Y")
 
     names = Array( _
-        BUTTON_1W, _
-        BUTTON_1M, _
-        BUTTON_3M, _
-        BUTTON_6M, _
-        BUTTON_1Y, _
-        BUTTON_3Y, _
-        BUTTON_5Y, _
-        BUTTON_MAX, _
-        BUTTON_AUTO_Y)
+        BUTTON_1W, BUTTON_1M, BUTTON_3M, _
+        BUTTON_6M, BUTTON_1Y, BUTTON_3Y, _
+        BUTTON_5Y, BUTTON_MAX, BUTTON_AUTO_Y)
 
     macros = Array( _
-        "SetWindow1W", _
-        "SetWindow1M", _
-        "SetWindow3M", _
-        "SetWindow6M", _
-        "SetWindow1Y", _
-        "SetWindow3Y", _
-        "SetWindow5Y", _
-        "SetWindowMaximum", _
+        "SetWindow1W", "SetWindow1M", "SetWindow3M", _
+        "SetWindow6M", "SetWindow1Y", "SetWindow3Y", _
+        "SetWindow5Y", "SetWindowMaximum", _
         "ResetYAxisDashboard")
 
     gap = 1
@@ -1315,7 +1273,7 @@ Private Sub CreatePeriodButtons(ByVal ws As Excel.Worksheet)
 End Sub
 
 '===============================================================================
-' BUTTON AND READOUT CREATION
+' BUTTONS AND READOUTS
 '===============================================================================
 Private Sub AddActionButton( _
     ByVal ws As Excel.Worksheet, _
@@ -1440,7 +1398,7 @@ Private Sub AddReadoutBox( _
 End Sub
 
 '===============================================================================
-' CONTROL UPDATES
+' CONTROL STATE
 '===============================================================================
 Private Sub UpdateControlLimits( _
     ByVal ws As Excel.Worksheet, _
@@ -1500,16 +1458,11 @@ Private Sub SetShapeCaption( _
     ByVal caption As String)
 
     On Error Resume Next
-
     ws.Shapes(shapeName).TextFrame2.TextRange.Text = caption
-
     On Error GoTo 0
 
 End Sub
 
-'===============================================================================
-' PERIOD BUTTON ACTIVE STYLE
-'===============================================================================
 Private Sub UpdatePeriodButtonStyles( _
     ByVal ws As Excel.Worksheet, _
     ByVal totalPoints As Long, _
@@ -1567,10 +1520,8 @@ Private Sub SetPeriodButtonActive( _
         shp.Line.ForeColor.RGB = RGB(110, 110, 110)
 
         With shp.TextFrame2.TextRange.Font
-
             .Bold = msoTrue
             .Fill.ForeColor.RGB = RGB(0, 0, 0)
-
         End With
 
     Else
@@ -1579,19 +1530,14 @@ Private Sub SetPeriodButtonActive( _
         shp.Line.ForeColor.RGB = RGB(170, 170, 170)
 
         With shp.TextFrame2.TextRange.Font
-
             .Bold = msoFalse
             .Fill.ForeColor.RGB = RGB(0, 0, 0)
-
         End With
 
     End If
 
 End Sub
 
-'===============================================================================
-' X RANGE STATUS
-'===============================================================================
 Private Sub UpdateXRangeStatus( _
     ByVal ws As Excel.Worksheet, _
     ByVal startIndex As Long, _
@@ -1629,7 +1575,9 @@ Private Sub DrawTimeSeriesChart( _
 
     Dim chartObject As Excel.ChartObject
     Dim ch As Excel.Chart
-    Dim chartSeries As Excel.Series
+
+    Dim mainSeries As Excel.Series
+    Dim latestSeries As Excel.Series
 
     Dim outputData() As Variant
     Dim xRange As Excel.Range
@@ -1652,6 +1600,14 @@ Private Sub DrawTimeSeriesChart( _
     Dim actualMarkerSize As Long
 
     Dim availablePlotWidth As Double
+    Dim lastHelperRow As Long
+
+    Dim latestIndex As Long
+    Dim latestValue As Double
+    Dim latestDate As Double
+
+    Dim legendWidth As Double
+    Dim legendHeight As Double
 
     viewPoints = endIndex - startIndex + 1
 
@@ -1660,9 +1616,16 @@ Private Sub DrawTimeSeriesChart( _
     Set outputRange = ws.Range(CHART_OUTPUT_RANGE)
     Set helperTop = ws.Range(HELPER_DATE_COL & "1")
 
+    lastHelperRow = ws.Range( _
+        HELPER_DATE_COL & ws.Rows.Count).End(xlUp).Row
+
+    If lastHelperRow < 2 Then
+        lastHelperRow = 2
+    End If
+
     ws.Range( _
-        HELPER_DATE_COL & ":" & _
-        HELPER_SERIES_3_COL).ClearContents
+        HELPER_DATE_COL & "1:" & _
+        HELPER_SERIES_3_COL & lastHelperRow).ClearContents
 
     ReDim outputData( _
         1 To viewPoints, _
@@ -1699,19 +1662,20 @@ Private Sub DrawTimeSeriesChart( _
         viewPoints, _
         1)
 
-    Set chartObject = GetOrCreateChartObject( _
-        ws, _
-        CHART_OBJECT_NAME)
+    ' Recreate the chart on each refresh.
+    ' This guarantees that old titles and old data labels are removed.
+    On Error Resume Next
+    ws.ChartObjects(CHART_OBJECT_NAME).Delete
+    On Error GoTo 0
 
-    With chartObject
+    Set chartObject = ws.ChartObjects.Add( _
+        Left:=outputRange.Left, _
+        Top:=outputRange.Top, _
+        Width:=outputRange.Width, _
+        Height:=outputRange.Height)
 
-        .Left = outputRange.Left
-        .Top = outputRange.Top
-        .Width = outputRange.Width
-        .Height = outputRange.Height
-        .Placement = xlMoveAndSize
-
-    End With
+    chartObject.Name = CHART_OBJECT_NAME
+    chartObject.Placement = xlMoveAndSize
 
     Set ch = chartObject.Chart
 
@@ -1724,22 +1688,34 @@ Private Sub DrawTimeSeriesChart( _
             .SeriesCollection(1).Delete
         Loop
 
+        '-----------------------------------------------------------------------
+        ' Main series
+        '-----------------------------------------------------------------------
         For seriesIndex = 1 To seriesCount
 
             Set yRange = helperTop.Offset( _
                 1, _
                 seriesIndex).Resize(viewPoints, 1)
 
-            Set chartSeries = .SeriesCollection.NewSeries
+            Set mainSeries = .SeriesCollection.NewSeries
 
             seriesColor = GetSeriesColor(seriesIndex)
 
-            With chartSeries
+            With mainSeries
 
-                .Name = displayNames(seriesIndex)
+                ' Link the legend name explicitly to the header cell.
+                .Name = "='" & _
+                    Replace(ws.Name, "'", "''") & _
+                    "'!" & _
+                    helperTop.Offset(0, seriesIndex).Address
+
                 .XValues = xRange
                 .Values = yRange
                 .Smooth = False
+
+                On Error Resume Next
+                .HasDataLabels = False
+                On Error GoTo 0
 
                 With .Format.Line
 
@@ -1772,27 +1748,14 @@ Private Sub DrawTimeSeriesChart( _
 
         Next seriesIndex
 
+        ' Completely remove the chart title.
+        On Error Resume Next
+        .ChartTitle.Delete
+        On Error GoTo 0
+
         .HasTitle = False
         .HasLegend = True
         .DisplayBlanksAs = xlNotPlotted
-
-        ' Set to Right first so Excel creates a vertical legend.
-        With .Legend
-
-            .Position = xlLegendPositionRight
-            .IncludeInLayout = False
-
-            .Font.Name = "Arial"
-            .Font.Size = 8
-
-            .Format.Fill.Visible = msoTrue
-            .Format.Fill.Solid
-            .Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
-            .Format.Fill.Transparency = 0.12
-
-            .Format.Line.Visible = msoFalse
-
-        End With
 
         With .ChartArea.Format
 
@@ -1826,8 +1789,9 @@ Private Sub DrawTimeSeriesChart( _
 
     yNumberFormat = NumberFormatFromStep(yMajorUnit)
 
-    On Error Resume Next
-
+    '---------------------------------------------------------------------------
+    ' Y axis
+    '---------------------------------------------------------------------------
     With ch.Axes(xlValue)
 
         .MinimumScaleIsAuto = False
@@ -1886,6 +1850,9 @@ Private Sub DrawTimeSeriesChart( _
         1, _
         xMajorUnit / 2)
 
+    '---------------------------------------------------------------------------
+    ' X axis
+    '---------------------------------------------------------------------------
     With ch.Axes(xlCategory)
 
         .MinimumScaleIsAuto = False
@@ -1925,42 +1892,158 @@ Private Sub DrawTimeSeriesChart( _
 
     End With
 
-    ch.Refresh
-    DoEvents
-
-    ' Move the vertically arranged legend inside the upper-left corner.
-    With ch.Legend
-
-        .Left = ch.PlotArea.InsideLeft + 5
-        .Top = ch.PlotArea.InsideTop + 5
-
-    End With
-
-    ' Highlight the newest valid point in each displayed series.
+    '---------------------------------------------------------------------------
+    ' Add one-point helper series for the latest visible value.
+    '
+    ' A separate series is used so data labels are never applied to all points.
+    '---------------------------------------------------------------------------
     For seriesIndex = 1 To seriesCount
 
-        Set chartSeries = ch.SeriesCollection(seriesIndex)
-
-        EmphasizeLatestVisiblePoint _
-            chartSeries:=chartSeries, _
+        latestIndex = FindLatestVisiblePointIndex( _
             yAll:=yAll, _
             seriesIndex:=seriesIndex, _
             startIndex:=startIndex, _
-            endIndex:=endIndex, _
-            normalMarkerSize:=markerSize, _
-            numberFormat:=yNumberFormat
+            endIndex:=endIndex)
+
+        If latestIndex > 0 Then
+
+            latestDate = CDbl(CDate(xAll(latestIndex)))
+            latestValue = CDbl(yAll(latestIndex, seriesIndex))
+
+            Set latestSeries = ch.SeriesCollection.NewSeries
+
+            With latestSeries
+
+                .Name = "__LATEST_" & CStr(seriesIndex)
+
+                .XValues = Array(latestDate)
+                .Values = Array(latestValue)
+
+                .Format.Line.Visible = msoFalse
+
+                .MarkerStyle = xlMarkerStyleCircle
+                .MarkerSize = Application.WorksheetFunction.Max( _
+                    7, _
+                    markerSize + 3)
+
+                .MarkerForegroundColor = RGB(192, 0, 0)
+                .MarkerBackgroundColor = RGB(192, 0, 0)
+
+                .ApplyDataLabels
+
+                With .DataLabels(1)
+
+                    .ShowValue = True
+                    .ShowSeriesName = False
+                    .ShowCategoryName = False
+                    .ShowLegendKey = False
+
+                    .NumberFormat = yNumberFormat
+                    .Text = Format$(latestValue, yNumberFormat)
+
+                    .Position = xlLabelPositionLeft
+
+                    .Font.Name = "Arial"
+                    .Font.Size = 8
+                    .Font.Bold = True
+                    .Font.Color = RGB(192, 0, 0)
+
+                    .Format.Fill.Visible = msoFalse
+                    .Format.Line.Visible = msoFalse
+
+                    Select Case seriesIndex
+
+                        Case 2
+                            .Top = .Top - 10
+
+                        Case 3
+                            .Top = .Top + 10
+
+                    End Select
+
+                End With
+
+            End With
+
+        End If
 
     Next seriesIndex
+
+    ' Ensure no chart title was recreated.
+    On Error Resume Next
+    ch.ChartTitle.Delete
+    ch.HasTitle = False
+    On Error GoTo 0
 
     ch.Refresh
     DoEvents
 
-    On Error GoTo 0
+    '---------------------------------------------------------------------------
+    ' Legend
+    '
+    ' Delete legend entries created by the latest-point helper series.
+    ' Only the original selected series remain in the legend.
+    '---------------------------------------------------------------------------
+    If ch.HasLegend Then
+
+        On Error Resume Next
+
+        Do While ch.Legend.LegendEntries.Count > seriesCount
+
+            ch.Legend.LegendEntries( _
+                ch.Legend.LegendEntries.Count).Delete
+
+        Loop
+
+        On Error GoTo 0
+
+        With ch.Legend
+
+            ' Right first forces a vertical legend.
+            .Position = xlLegendPositionRight
+            .IncludeInLayout = False
+
+            .Font.Name = "Arial"
+            .Font.Size = 8
+
+            .Format.Fill.Visible = msoTrue
+            .Format.Fill.Solid
+            .Format.Fill.ForeColor.RGB = RGB(255, 255, 255)
+            .Format.Fill.Transparency = 0.12
+
+            .Format.Line.Visible = msoFalse
+
+        End With
+
+        ch.Refresh
+        DoEvents
+
+        legendWidth = 125
+        legendHeight = 8 + seriesCount * 15
+
+        On Error Resume Next
+
+        With ch.Legend
+
+            .Left = ch.PlotArea.InsideLeft + 5
+            .Top = ch.PlotArea.InsideTop + 5
+
+            .Width = legendWidth
+            .Height = legendHeight
+
+        End With
+
+        On Error GoTo 0
+
+    End If
+
+    ch.Refresh
+    DoEvents
 
 End Sub
 
 '===============================================================================
-' LATEST POINT HIGHLIGHTING
+' LATEST POINT
 '===============================================================================
 Private Function FindLatestVisiblePointIndex( _
     ByRef yAll() As Variant, _
@@ -1986,102 +2069,6 @@ Private Function FindLatestVisiblePointIndex( _
     Next pointIndex
 
 End Function
-
-Private Function GetLatestLabelVerticalOffset( _
-    ByVal seriesIndex As Long) As Double
-
-    Select Case seriesIndex
-
-        Case 1
-            GetLatestLabelVerticalOffset = 0
-
-        Case 2
-            GetLatestLabelVerticalOffset = -10
-
-        Case 3
-            GetLatestLabelVerticalOffset = 10
-
-        Case Else
-            GetLatestLabelVerticalOffset = 0
-
-    End Select
-
-End Function
-
-Private Sub EmphasizeLatestVisiblePoint( _
-    ByVal chartSeries As Excel.Series, _
-    ByRef yAll() As Variant, _
-    ByVal seriesIndex As Long, _
-    ByVal startIndex As Long, _
-    ByVal endIndex As Long, _
-    ByVal normalMarkerSize As Long, _
-    ByVal numberFormat As String)
-
-    Dim latestGlobalIndex As Long
-    Dim relativePointIndex As Long
-
-    Dim latestMarkerSize As Long
-    Dim verticalOffset As Double
-
-    latestGlobalIndex = FindLatestVisiblePointIndex( _
-        yAll:=yAll, _
-        seriesIndex:=seriesIndex, _
-        startIndex:=startIndex, _
-        endIndex:=endIndex)
-
-    If latestGlobalIndex <= 0 Then Exit Sub
-
-    relativePointIndex = _
-        latestGlobalIndex - startIndex + 1
-
-    If relativePointIndex < 1 Then Exit Sub
-    If relativePointIndex > chartSeries.Points.Count Then Exit Sub
-
-    latestMarkerSize = Application.WorksheetFunction.Max( _
-        7, _
-        normalMarkerSize + 3)
-
-    verticalOffset = GetLatestLabelVerticalOffset(seriesIndex)
-
-    On Error Resume Next
-
-    With chartSeries.Points(relativePointIndex)
-
-        .MarkerStyle = xlMarkerStyleCircle
-        .MarkerSize = latestMarkerSize
-
-        .MarkerForegroundColor = RGB(192, 0, 0)
-        .MarkerBackgroundColor = RGB(192, 0, 0)
-
-        .ApplyDataLabels
-
-        With .DataLabel
-
-            .ShowValue = True
-            .ShowSeriesName = False
-            .ShowCategoryName = False
-            .ShowLegendKey = False
-
-            .NumberFormat = numberFormat
-            .Position = xlLabelPositionLeft
-
-            .Font.Name = "Arial"
-            .Font.Size = 8
-            .Font.Bold = True
-            .Font.Color = RGB(192, 0, 0)
-
-            .Format.Fill.Visible = msoFalse
-            .Format.Line.Visible = msoFalse
-
-            .Top = .Top + verticalOffset
-
-        End With
-
-    End With
-
-    On Error GoTo 0
-
-End Sub
 
 '===============================================================================
 ' ADAPTIVE DATE AXIS
@@ -2159,8 +2146,8 @@ Private Function ChooseDateStepForMaximumLabels( _
     ByVal maximumLabels As Long) As Double
 
     Dim candidates As Variant
-    Dim i As Long
 
+    Dim i As Long
     Dim candidate As Double
     Dim labelCount As Double
 
@@ -2189,30 +2176,8 @@ Private Function ChooseDateStepForMaximumLabels( _
 End Function
 
 '===============================================================================
-' CHART OBJECT AND COLORS
+' SERIES COLORS
 '===============================================================================
-Private Function GetOrCreateChartObject( _
-    ByVal ws As Excel.Worksheet, _
-    ByVal chartName As String) As Excel.ChartObject
-
-    On Error Resume Next
-    Set GetOrCreateChartObject = ws.ChartObjects(chartName)
-    On Error GoTo 0
-
-    If GetOrCreateChartObject Is Nothing Then
-
-        Set GetOrCreateChartObject = ws.ChartObjects.Add( _
-            Left:=ws.Range(CHART_OUTPUT_RANGE).Left, _
-            Top:=ws.Range(CHART_OUTPUT_RANGE).Top, _
-            Width:=ws.Range(CHART_OUTPUT_RANGE).Width, _
-            Height:=ws.Range(CHART_OUTPUT_RANGE).Height)
-
-        GetOrCreateChartObject.Name = chartName
-
-    End If
-
-End Function
-
 Private Function GetSeriesColor(ByVal seriesIndex As Long) As Long
 
     Select Case seriesIndex
@@ -2234,7 +2199,7 @@ Private Function GetSeriesColor(ByVal seriesIndex As Long) As Long
 End Function
 
 '===============================================================================
-' SELECTED SHEET/SERIES PAIRS
+' SELECTED SERIES
 '===============================================================================
 Private Function GetSelectedSeriesPairs( _
     ByVal ws As Excel.Worksheet, _
@@ -2361,10 +2326,7 @@ Private Sub BuildDisplayNames( _
 End Sub
 
 '===============================================================================
-' LOAD AND ALIGN DATA FROM DIFFERENT SHEETS
-'
-' All selected series are aligned to the union of their dates.
-' Missing observations are stored as #N/A.
+' LOAD AND ALIGN DATA
 '===============================================================================
 Private Function LoadAlignedDashboardData( _
     ByRef seriesSheets() As String, _
@@ -2678,7 +2640,7 @@ Private Sub QuickSortDates( _
 End Sub
 
 '===============================================================================
-' VISIBLE RANGE STATISTICS
+' VISIBLE MINIMUM AND MAXIMUM
 '===============================================================================
 Private Sub GetVisibleGlobalMinMax( _
     ByRef yAll() As Variant, _
@@ -2870,7 +2832,6 @@ Private Function ChooseNiceNumericStep( _
             If candidate > 0 Then
 
                 intervalCount = spanValue / candidate
-
                 score = Abs(intervalCount - targetIntervals)
 
                 If intervalCount < 9 Then
@@ -2903,10 +2864,7 @@ Private Function ChooseNiceNumericStep( _
     Next exponentValue
 
     If bestCandidate <= 0 Then
-
-        bestCandidate = _
-            spanValue / targetIntervals
-
+        bestCandidate = spanValue / targetIntervals
     End If
 
     ChooseNiceNumericStep = bestCandidate
@@ -3004,7 +2962,7 @@ Private Function NumberFormatFromStep( _
 End Function
 
 '===============================================================================
-' DATA SHEET DROPDOWNS
+' SHEET DROPDOWNS
 '===============================================================================
 Private Sub BuildSheetDropdown(ByVal ws As Excel.Worksheet)
 
@@ -3201,8 +3159,7 @@ Private Sub BuildSeriesDropdownForSlot( _
 
 End Sub
 
-Private Sub EnsureValidSeriesSelections( _
-    ByVal ws As Excel.Worksheet)
+Private Sub EnsureValidSeriesSelections(ByVal ws As Excel.Worksheet)
 
     EnsureSeriesForSlot _
         ws:=ws, _
@@ -3533,7 +3490,7 @@ Private Function ScrollLimit( _
 End Function
 
 '===============================================================================
-' DELETE OLD DASHBOARD OBJECTS
+' CLEANUP
 '===============================================================================
 Private Sub DeleteDashboardObjects(ByVal ws As Excel.Worksheet)
 

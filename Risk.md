@@ -9,11 +9,11 @@ JGB Trader Model VaR Management
 • Marginal VaRおよびComponent VaR
 • 単独VaRとの違い
 • 単一商品・複数商品によるVaR最小化
-• VaR最小化後の変化額 (\Delta c)
+• VaR最小化後の変化額 ($\Delta c$)
 • 年限モデルからトレーダーモデルへの共分散変換
 • Excel VBAによるシート関数
 
-本書で用いられる「CoVaR」は、共分散行列を使ったVariance–Covariance VaRを指す。システミックリスク研究のCoVaRや、Expected Shortfallの別名として使われるCVaRとは別概念である。
+本書で用いられる「CoVaR」は、共分散行列を使ったVariance–Covariance VaRを指す。システミックリスク研究のCoVaRや、Expected Shortfallの別名として使われるCoVaRとは異なる。
 
 ────────
 
@@ -21,17 +21,17 @@ JGB Trader Model VaR Management
 
 |記号                         |意味                   |
 |---------------------------|---------------------|
-|(S_{\mathrm{grid}})        |年限別BPVベクトル           |
-|(S_{\mathrm{trade}})       |トレーダーモデル上のリスクベクトル    |
-|(J)                        |TradeMatrix          |
-|(\Delta r_{\mathrm{grid}}) |年限別金利変化              |
-|(\Delta r_{\mathrm{trade}})|Base Trade別の市場変化     |
-|(Q_{\mathrm{grid}})        |年限別金利変化の共分散行列        |
-|(Q_{\mathrm{trade}})       |トレーダーモデル上の共分散行列      |
-|(c)                        |信頼係数を掛ける前の1標準偏差PnLリスク|
-|(z)                        |信頼係数                 |
-|(V)                        |信頼係数を掛けたVaR          |
-|(e_i)                      |第(i)成分のみ1の単位ベクトル     |
+|$S_{\mathrm{grid}}$        |年限別BPVベクトル           |
+|$S_{\mathrm{trade}}$       |トレーダーモデル上のリスクベクトル    |
+|$J$                        |TradeMatrix          |
+|$\Delta r_{\mathrm{grid}}$ |年限別金利変化              |
+|$\Delta r_{\mathrm{trade}}$|Base Trade別の市場変化     |
+|$Q_{\mathrm{grid}}$        |年限別金利変化の共分散行列        |
+|$Q_{\mathrm{trade}}$       |トレーダーモデル上の共分散行列      |
+|$c$                        |信頼係数を掛ける前の1標準偏差PnLリスク|
+|$z$                        |信頼係数                 |
+|$V$                        |信頼係数を掛けたVaR          |
+|$e_i$                      |第$i$成分のみ1の単位ベクトル     |
 
 典型的な単位は以下のとおりである。
 
@@ -50,29 +50,19 @@ JGB Trader Model VaR Management
 
 TradeMatrixを次のように定義する。
 
-[
-S_{\mathrm{grid}}=J S_{\mathrm{trade}}
-]
+$$S_{\mathrm{grid}}=J S_{\mathrm{trade}}$$
 
-(J)が正方かつフルランクなら、
+$J$が正方かつフルランクなら、
 
-[
-\boxed{
-S_{\mathrm{trade}}=J^{-1}S_{\mathrm{grid}}
-}
-]
+$$\boxed{S_{\mathrm{trade}}=J^{-1}S_{\mathrm{grid}}}$$
 
 となる。
 
 各列は、例えば次のようなBase Tradeを表す。
 
-[
-2s5s=-2Y+5Y
-]
+$$2s5s=-2Y+5Y$$
 
-[
-2s3s4s=+2Y-2\times3Y+4Y
-]
+$$2s3s4s=+2Y-2\times3Y+4Y$$
 
 トレーダーモデルの各成分は、実際の銘柄保有額ではなく、年限別BPVをBase Tradeの組み合わせで再現した座標係数である。
 
@@ -80,11 +70,7 @@ S_{\mathrm{trade}}=J^{-1}S_{\mathrm{grid}}
 
 Base Tradeの市場変化は、
 
-[ \boxed{ \Delta r_{\mathrm{trade}}
-
-J^T\Delta r_{\mathrm{grid}}
-}
-]
+$$\boxed{\Delta r_{\mathrm{trade}}=J^T\Delta r_{\mathrm{grid}}}$$
 
 である。
 
@@ -92,26 +78,19 @@ J^T\Delta r_{\mathrm{grid}}
 
 したがって、トレーダーモデル上の共分散行列は、
 
-[ \boxed{ Q_{\mathrm{trade}}
-
-J^TQ_{\mathrm{grid}}J
-}
-]
+$$\boxed{Q_{\mathrm{trade}}=J^TQ_{\mathrm{grid}}J}$$
 
 となる。
 
 リスクベクトルと共分散行列を整合的に変換すれば、
 
-[ S_{\mathrm{trade}}^TQ_{\mathrm{trade}}S_{\mathrm{trade}}
-
-S_{\mathrm{grid}}^TQ_{\mathrm{grid}}S_{\mathrm{grid}}
-]
+$$S_{\mathrm{trade}}^TQ_{\mathrm{trade}}S_{\mathrm{trade}}=S_{\mathrm{grid}}^TQ_{\mathrm{grid}}S_{\mathrm{grid}}$$
 
 となり、ポートフォリオ全体のVaRは座標変換によって変わらない。
 
 > 注意  
-> (Q_{\mathrm{trade}}=J^{-1}Q_{\mathrm{grid}}(J^{-1})^T)ではない。  
-> 本モデルの定義では、正しい式は (Q_{\mathrm{trade}}=J^TQ_{\mathrm{grid}}J) である。
+> $Q_{\mathrm{trade}}=J^{-1}Q_{\mathrm{grid}}(J^{-1})^T$ ではない。  
+> 本モデルの定義では、正しい式は $Q_{\mathrm{trade}}=J^TQ_{\mathrm{grid}}J$ である。
 
 ────────
 
@@ -119,39 +98,27 @@ S_{\mathrm{grid}}^TQ_{\mathrm{grid}}S_{\mathrm{grid}}
 
 ポートフォリオの線形PnLを、
 
-[
-\Delta P=S^T\Delta r
-]
+$$\Delta P=S^T\Delta r$$
 
 とする。
 
 PnL分散は、
 
-[
-\operatorname{Var}(\Delta P)=S^TQS
-]
+$$\operatorname{Var}(\Delta P)=S^TQS$$
 
 したがって、1標準偏差のPnLリスクは、
 
-[
-\boxed{
-c=\sqrt{S^TQS}
-}
-]
+$$\boxed{c=\sqrt{S^TQS}}$$
 
-信頼係数(z)を掛けたVaRは、
+信頼係数$z$を掛けたVaRは、
 
-[
-\boxed{
-V=z\sqrt{S^TQS}
-}
-]
+$$\boxed{V=z\sqrt{S^TQS}}$$
 
 である。
 
 代表的な片側信頼係数は以下のとおり。
 
-|信頼水準|(z)  |
+|信頼水準|$z$  |
 |----|----:|
 |95% |1.645|
 |99% |2.326|
@@ -164,51 +131,29 @@ VaR Allocationは、ポートフォリオ全体のVaRを、各リスクファク
 
 5.1 Marginal VaR
 
-[
-V=z\sqrt{S^TQS}
-]
+$$V=z\sqrt{S^TQS}$$
 
-を(S_i)で偏微分すると、
+を$S_i$で偏微分すると、
 
-[ \boxed{ \mathrm{MVaR}_i
-
-\frac{\partial V}{\partial S_i}
-
-z\frac{(QS)_i}{\sqrt{S^TQS}}
-}
-]
+$$\boxed{\mathrm{MVaR}_i=\frac{\partial V}{\partial S_i}=z\frac{(QS)_i}{\sqrt{S^TQS}}}$$
 
 となる。
 
-これは、Trade (i) のリスクを1単位追加した場合に、全体VaRが限界的にどれだけ変化するかを表す。
+これは、Trade $i$ のリスクを1単位追加した場合に、全体VaRが限界的にどれだけ変化するかを表す。
 
 5.2 Component VaR
 
-[ \boxed{ \mathrm{CVaR}_i
-
-S_i\mathrm{MVaR}_i
-
-z\frac{S_i(QS)_i}{\sqrt{S^TQS}}
-}
-]
+$$\boxed{\mathrm{CVaR}_i=S_i\mathrm{MVaR}_i=z\frac{S_i(QS)_i}{\sqrt{S^TQS}}}$$
 
 ベクトル形式では、
 
-[ \boxed{ \mathrm{CVaR}
-
-z\frac{\operatorname{diag}(S)QS}{\sqrt{S^TQS}}
-}
-]
+$$\boxed{\mathrm{CVaR}=z\frac{\operatorname{diag}(S)QS}{\sqrt{S^TQS}}}$$
 
 である。
 
 Euler配分の性質により、
 
-[
-\boxed{
-\sum_i \mathrm{CVaR}_i=V
-}
-]
+$$\boxed{\sum_i \mathrm{CVaR}_i=V}$$
 
 が成立する。
 
@@ -216,11 +161,7 @@ Euler配分の性質により、
 
 各TradeのVaR寄与率は、
 
-[ \boxed{ \mathrm{VaRShare}_i
-
-\frac{\mathrm{CVaR}_i}{V}
-}
-]
+$$\boxed{\mathrm{VaRShare}_i=\frac{\mathrm{CVaR}_i}{V}}$$
 
 である。
 
@@ -244,23 +185,15 @@ Component VaRが負の場合、そのTradeは現在のポートフォリオ内�
 
 6. Standalone VaRとの違い
 
-Trade (i)だけを単独で保有した場合のVaRは、
+Trade $i$だけを単独で保有した場合のVaRは、
 
-[ \boxed{ \mathrm{StandaloneVaR}_i
-
-z|S_i|\sqrt{q_{ii}}
-}
-]
+$$\boxed{\mathrm{StandaloneVaR}_i=z|S_i|\sqrt{q_{ii}}}$$
 
 である。
 
 一方、Component VaRは、
 
-[ \boxed{ \mathrm{CVaR}_i
-
-z\frac{S_i(QS)_i}{\sqrt{S^TQS}}
-}
-]
+$$\boxed{\mathrm{CVaR}_i=z\frac{S_i(QS)_i}{\sqrt{S^TQS}}}$$
 
 である。
 
@@ -290,13 +223,9 @@ z\frac{S_i(QS)_i}{\sqrt{S^TQS}}
 
 6.3 Close-out VaR Change
 
-Trade (i)を全量閉じた場合の実際のVaR変化は、
+Trade $i$を全量閉じた場合の実際のVaR変化は、
 
-[ \boxed{ \Delta V_i^{\mathrm{close}}
-
-V(S-S_ie_i)-V(S)
-}
-]
+$$\boxed{\Delta V_i^{\mathrm{close}}=V(S-S_ie_i)-V(S)}$$
 
 である。
 
@@ -306,37 +235,25 @@ Component VaRは限界感応度に基づく加法的配分であり、全量閉�
 
 7. 単一商品によるVaR最小化
 
-商品 (i)だけを(x)取引する場合、新しいリスクは、
+商品 $i$だけを$x$取引する場合、新しいリスクは、
 
-[
-S^{\mathrm{new}}=S+xe_i
-]
+$$S^{\mathrm{new}}=S+xe_i$$
 
 となる。
 
 取引後の分散は、
 
-[
-(S+xe_i)^TQ(S+xe_i)
-]
+$$(S+xe_i)^TQ(S+xe_i)$$
 
-これを(x)について最小化すると、
+これを$x$について最小化すると、
 
-[ \boxed{ x_i^*
-
--\frac{(QS)i}{q{ii}}
-}
-]
+$$\boxed{x_i^*=-\frac{(QS)_i}{q_{ii}}}$$
 
 となる。
 
 すべての商品について計算したベクトルは、
 
-[ \boxed{ S^{\mathrm{trade}}
-
--\operatorname{diag}(\operatorname{diag}Q)^{-1}QS
-}
-]
+$$\boxed{S^{\mathrm{trade}}=-\operatorname{diag}(\operatorname{diag}Q)^{-1}QS}$$
 
 である。
 
@@ -344,142 +261,85 @@ S^{\mathrm{new}}=S+xe_i
 
 ────────
 
-8. 図中の (\Delta c) の計算
+8. 図中の $\Delta c$ の計算
 
 8.1 取引前
 
-[ \boxed{ c_{\mathrm{before}}
+$$\boxed{c_{\mathrm{before}}=\sqrt{S^TQS}}$$
 
-\sqrt{S^TQS}
-}
-]
+8.2 任意の取引量$x$
 
-8.2 任意の取引量(x)
+商品 $i$を$x$取引した後の1σリスクは、
 
-商品 (i)を(x)取引した後の1σリスクは、
-
-[ c_{\mathrm{new}}(x)
-
-\sqrt{(S+xe_i)^TQ(S+xe_i)}
-]
+$$c_{\mathrm{new}}(x)=\sqrt{(S+xe_i)^TQ(S+xe_i)}$$
 
 展開すると、
 
-[ \boxed{ c_{\mathrm{new}}(x)
-
-\sqrt{
-c_{\mathrm{before}}^2
-+
-2x(QS)i
-+
-x^2q{ii}
-}
-}
-]
+$$\boxed{c_{\mathrm{new}}(x)=\sqrt{c_{\mathrm{before}}^2+2x(QS)_i+x^2q_{ii}}}$$
 
 したがって、符号付き変化額は、
 
-[ \boxed{ \Delta c(x)
-
-c_{\mathrm{new}}(x)-c_{\mathrm{before}}
-}
-]
+$$\boxed{\Delta c(x)=c_{\mathrm{new}}(x)-c_{\mathrm{before}}}$$
 
 である。
 
-• (\Delta c<0)：VaR減少
-• (\Delta c>0)：VaR増加
+• $\Delta c<0$：VaR減少
+• $\Delta c>0$：VaR増加
 
 8.3 最適取引量を使った場合
 
-[ x_i^*
-
--\frac{(QS)i}{q{ii}}
-]
+$$x_i^*=-\frac{(QS)_i}{q_{ii}}$$
 
 を代入すると、
 
-[ \boxed{ c_i^{\min}
-
-\sqrt{
-c^2-\frac{(QS)i^2}{q{ii}}
-}
-}
-]
+$$\boxed{c_i^{\min}=\sqrt{c^2-\frac{(QS)_i^2}{q_{ii}}}}$$
 
 よって、
 
-[ \boxed{ \Delta c_i
-
-c_i^{\min}-c
-
-\sqrt{
-c^2-\frac{(QS)i^2}{q{ii}}
-}
--c
-}
-]
+$$\boxed{\Delta c_i=c_i^{\min}-c=\sqrt{c^2-\frac{(QS)_i^2}{q_{ii}}}-c}$$
 
 となる。
 
 VaR削減額を正の値で表示する場合は、
 
-[ \boxed{ \mathrm{VaRReduction}_i
-
-c-c_i^{\min}
-}
-]
+$$\boxed{\mathrm{VaRReduction}_i=c-c_i^{\min}}$$
 
 VaR削減率は、
 
-[ \boxed{ \mathrm{ReductionRate}_i
-
-\frac{c-c_i^{\min}}{c}
-}
-]
+$$\boxed{\mathrm{ReductionRate}_i=\frac{c-c_i^{\min}}{c}}$$
 
 である。
 
-信頼係数(z)を掛ける場合、取引前後の両方へ同じ(z)を掛ける。
+信頼係数$z$を掛ける場合、取引前後の両方へ同じ$z$を掛ける。
 
 ────────
 
 9. 複数商品によるVaR最小化
 
-取引可能な複数商品のリスク方向を列に持つ行列を(H)とする。
+取引可能な複数商品のリスク方向を列に持つ行列を$H$とする。
 
-[
-S^{\mathrm{new}}=S+Hx
-]
+$$S^{\mathrm{new}}=S+Hx$$
 
 このとき、VaRを最小化する取引量は、
 
-[ \boxed{ x^*
-
--(H^TQH)^{-1}H^TQS
-}
-]
+$$\boxed{x^*=-(H^TQH)^{-1}H^TQS}$$
 
 となる。
 
 取引後リスクは、
 
-[
-\boxed{
-S^{\mathrm{new}}=S+Hx^*
-}
-]
+$$\boxed{S^{\mathrm{new}}=S+Hx^*}$$
 
 である。
 
-9.1 トレーダーモデルでの(H)
+9.1 トレーダーモデルでの$H$
 
-• トレーダーモデル座標上で特定のBase Tradeを選ぶ場合：(H)は選択行列
-• 年限グリッド上でBase Tradeを取引する場合：(H)はTradeMatrix (J) の選択列
+• トレーダーモデル座標上で特定のBase Tradeを選ぶ場合：$H$は選択行列
+• 年限グリッド上でBase Tradeを取引する場合：$H$はTradeMatrix $J$ の選択列
 
 9.2 注意事項
 
-• (H^TQH)が特異または悪条件の場合、逆行列が不安定になる
+• $H^TQH$が特異または悪条件の場合、逆行列が不安定になる
 • 線形従属するトレードを同時に選ばない
 • 実務では取引コスト、流動性、数量上限を考慮する
 • 全ファクターを無制約で取引できる場合、理論上はリスクをゼロにできてしまうため、実務上の制約が必要
@@ -490,27 +350,15 @@ S^{\mathrm{new}}=S+Hx^*
 
 共分散ベースのリスク尺度、
 
-[
-c(S)=\sqrt{S^TQS}
-]
+$$c(S)=\sqrt{S^TQS}$$
 
-は、(Q)が半正定値なら劣加法性を満たす。
+は、$Q$が半正定値なら劣加法性を満たす。
 
-[
-\boxed{
-c(S_A+S_B)
-\le
-c(S_A)+c(S_B)
-}
-]
+$$\boxed{c(S_A+S_B)\le c(S_A)+c(S_B)}$$
 
 分散効果は、
 
-[ \boxed{ \mathrm{DiversificationBenefit}
-
-c(S_A)+c(S_B)-c(S_A+S_B)
-}
-]
+$$\boxed{\mathrm{DiversificationBenefit}=c(S_A)+c(S_B)-c(S_A+S_B)}$$
 
 で測定できる。
 
@@ -764,10 +612,7 @@ Allocationの検算
 
 は、
 
-[ Q_{\mathrm{trade}}
-
-J^TQ_{\mathrm{grid}}J
-]
+$$Q_{\mathrm{trade}}=J^TQ_{\mathrm{grid}}J$$
 
 を返す。
 
@@ -775,7 +620,7 @@ J^TQ_{\mathrm{grid}}J
 
 13. 推奨表示項目
 
-|Base Trade|Current BPV|Absolute BPV|Standalone VaR|Marginal VaR|Component VaR|VaR Share|Single Optimal Trade|(\Delta c)|Reduction Rate|
+|Base Trade|Current BPV|Absolute BPV|Standalone VaR|Marginal VaR|Component VaR|VaR Share|Single Optimal Trade|$\Delta c$|Reduction Rate|
 |----------|----------:|-----------:|-------------:|-----------:|------------:|--------:|-------------------:|---------:|-------------:|
 
 各列の意味
@@ -787,7 +632,7 @@ J^TQ_{\mathrm{grid}}J
 • Component VaR：現在の全体VaRへの寄与
 • VaR Share：Component VaRを全体VaRで割った割合
 • Single Optimal Trade：そのTradeだけでVaRを最小化する取引量
-• (\Delta c)：最適化前後のVaR変化
+• $\Delta c$：最適化前後のVaR変化
 • Reduction Rate：最適化によるVaR削減率
 
 ────────

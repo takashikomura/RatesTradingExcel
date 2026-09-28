@@ -1,1081 +1,1497 @@
 # Change-PCA Residual Subspace Framework for JGB Relative Value
 
-## 1. Yield Curve and Change PCA
+## 1. Objective
+
+PCA is used for:
+
+- curve-state representation
+- systematic / residual decomposition
+- PCA hedge-ratio construction
+- factor-risk decomposition
+
+PCA is **not** used to determine whether a distortion will mean-revert or continue trending.
+
+Final trade direction is determined separately using:
+
+- flow
+- supply / demand
+- positioning
+- liquidity
+- BOJ / policy
+- macro regime
+- trader discretion
+
+---
+
+# 2. Yield Curve
 
 Yield curve:
 
-\[
-\mathbf y_t
+```math
+\mathbf{y}_t
 =
 \begin{pmatrix}
-y_{1,t}\\
-y_{2,t}\\
-\vdots\\
+y_{1,t} \\
+y_{2,t} \\
+\vdots \\
 y_{n,t}
 \end{pmatrix}
-\in\mathbb R^n
-\]
+\in
+\mathbb{R}^n
+```
 
-Daily change:
+Daily yield change:
 
-\[
-\Delta\mathbf y_t
+```math
+\Delta \mathbf{y}_t
 =
-\mathbf y_t-\mathbf y_{t-1}
-\]
+\mathbf{y}_t
+-
+\mathbf{y}_{t-1}
+```
 
-Change covariance:
+---
 
-\[
-\Sigma_\Delta
+# 3. Change PCA
+
+Estimate the covariance matrix from yield changes:
+
+```math
+\Sigma_{\Delta}
 =
-\operatorname{Cov}(\Delta\mathbf y_t)
-\]
+\mathrm{Cov}
+\left(
+\Delta \mathbf{y}_t
+\right)
+```
 
-PCA:
+Eigenvalue decomposition:
 
-\[
-\boxed{
-\Sigma_\Delta
+```math
+\Sigma_{\Delta}
 =
-V\Lambda V^\mathsf T
-}
-\]
+V
+\Lambda
+V^{\mathrm T}
+```
 
 where
 
-\[
+```math
 V
 =
 \begin{pmatrix}
-\mathbf v_1&
-\mathbf v_2&
-\cdots&
-\mathbf v_n
-\end{pmatrix},
-\qquad
-V^\mathsf TV=I
-\]
+\mathbf{v}_1 &
+\mathbf{v}_2 &
+\cdots &
+\mathbf{v}_n
+\end{pmatrix}
+```
 
 and
 
-\[
+```math
+V^{\mathrm T}V
+=
+I
+```
+
+Eigenvalue matrix:
+
+```math
 \Lambda
 =
-\operatorname{diag}
-(\lambda_1,\lambda_2,\ldots,\lambda_n),
-\qquad
-\lambda_1\ge\lambda_2\ge\cdots\ge\lambda_n.
-\]
+\mathrm{diag}
+\left(
+\lambda_1,
+\lambda_2,
+\ldots,
+\lambda_n
+\right)
+```
+
+with
+
+```math
+\lambda_1
+\ge
+\lambda_2
+\ge
+\cdots
+\ge
+\lambda_n
+```
 
 PC scores:
 
-\[
-\boxed{
-\mathbf f_t
+```math
+\mathbf{f}_t
 =
-V^\mathsf T\Delta\mathbf y_t
-}
-\]
+V^{\mathrm T}
+\Delta\mathbf{y}_t
+```
 
-\[
+For PC \(i\):
+
+```math
 f_{i,t}
 =
-\mathbf v_i^\mathsf T\Delta\mathbf y_t
-\]
+\mathbf{v}_i^{\mathrm T}
+\Delta\mathbf{y}_t
+```
 
 Reconstruction:
 
-\[
-\Delta\mathbf y_t
+```math
+\Delta\mathbf{y}_t
 =
-V\mathbf f_t
+V\mathbf{f}_t
+```
+
+or
+
+```math
+\Delta\mathbf{y}_t
 =
 \sum_{i=1}^{n}
-\mathbf v_i f_{i,t}
-\]
+\mathbf{v}_i f_{i,t}
+```
 
 ---
 
-## 2. Systematic Subspace
+# 4. Systematic Subspace
 
-Assume:
+Empirically for the JGB curve:
 
-\[
-PC1 \approx \text{Level}
-\]
+```math
+PC1
+\approx
+\mathrm{Level}
+```
 
-\[
-PC2 \approx \text{Slope}
-\]
+```math
+PC2
+\approx
+\mathrm{Slope}
+```
 
-Define
+Define:
 
-\[
+```math
 V_2
 =
 \begin{pmatrix}
-\mathbf v_1&
-\mathbf v_2
-\end{pmatrix}.
-\]
+\mathbf{v}_1 &
+\mathbf{v}_2
+\end{pmatrix}
+```
 
-Projection onto PC1-PC2:
+Projection onto the PC1-PC2 subspace:
 
-\[
-\boxed{
+```math
 P_2
 =
-V_2V_2^\mathsf T
-}
-\]
+V_2
+V_2^{\mathrm T}
+```
 
 Residual projector:
 
-\[
-\boxed{
+```math
 Q_2
 =
 I-P_2
-=
-I-V_2V_2^\mathsf T
-}
-\]
-
-Therefore
-
-\[
-\boxed{
-\mathbf x
-=
-P_2\mathbf x
-+
-Q_2\mathbf x
-}
-\]
-
-with
-
-\[
-P_2\mathbf x
-=
-\text{systematic component}
-\]
-
-and
-
-\[
-Q_2\mathbf x
-=
-\text{residual component}.
-\]
-
-Since
-
-\[
-I
-=
-\sum_{i=1}^{n}
-\mathbf v_i\mathbf v_i^\mathsf T,
-\]
-
-\[
-\boxed{
-Q_2
-=
-\sum_{i=3}^{n}
-\mathbf v_i\mathbf v_i^\mathsf T
-}
-\]
-
-and
-
-\[
-\boxed{
-Q_2\mathbf x
-=
-\sum_{i=3}^{n}
-\mathbf v_i
-(\mathbf v_i^\mathsf T\mathbf x)
-}
-\]
-
-Hence the framework does **not** require identification of a specific PC3, PC4, ..., PCn trade.
-
----
-
-## 3. Residual Calculation
-
-### 3.1 Daily Residual / Innovation
-
-Systematic daily move:
-
-\[
-\widehat{\Delta\mathbf y}_t
-=
-P_2\Delta\mathbf y_t
-\]
-
-Residual daily move:
-
-\[
-\boxed{
-\mathbf u_t
-=
-\Delta\mathbf y_t
--
-\widehat{\Delta\mathbf y}_t
-}
-\]
-
-Therefore
-
-\[
-\boxed{
-\mathbf u_t
-=
-Q_2\Delta\mathbf y_t
-}
-\]
-
-or equivalently,
-
-\[
-\boxed{
-\mathbf u_t
-=
-\left(
-I-V_2V_2^\mathsf T
-\right)
-\Delta\mathbf y_t
-}
-\]
-
----
-
-### 3.2 Historical Residual State
-
-For yield levels:
-
-\[
-\boxed{
-\mathbf R_t
-=
-Q_2(\mathbf y_t-\mathbf c)
-}
-\]
-
-where \(\mathbf c\) is an optional historical reference curve.
-
-If \(\mathbf c=0\),
-
-\[
-\boxed{
-\mathbf R_t
-=
-Q_2\mathbf y_t
-}
-\]
-
-Under a fixed PCA basis:
-
-\[
-\begin{aligned}
-\Delta\mathbf R_t
-&=
-\mathbf R_t-\mathbf R_{t-1}\\
-&=
-Q_2(\mathbf y_t-\mathbf y_{t-1})\\
-&=
-Q_2\Delta\mathbf y_t
-\end{aligned}
-\]
-
-Therefore
-
-\[
-\boxed{
-\Delta\mathbf R_t
-=
-\mathbf u_t
-}
-\]
-
-Interpretation:
-
-\[
-\boxed{
-\mathbf R_t=\text{Residual State}
-}
-\]
-
-\[
-\boxed{
-\mathbf u_t=\text{Residual Innovation}
-}
-\]
-
----
-
-## 4. PCA Hedge
-
-Signed BPV vector:
-
-\[
-\mathbf b
-=
-\begin{pmatrix}
-b_1\\
-b_2\\
-\vdots\\
-b_n
-\end{pmatrix}
-\]
-
-Approximate P\&L:
-
-\[
-\boxed{
-\Delta P_t
-\approx
--\mathbf b^\mathsf T
-\Delta\mathbf y_t
-}
-\]
-
-Using PCA:
-
-\[
-\Delta\mathbf y_t
-=
-V\mathbf f_t
-\]
-
-so
-
-\[
-\Delta P_t
-=
--\mathbf b^\mathsf TV\mathbf f_t.
-\]
-
-Define PCA exposure:
-
-\[
-\boxed{
-\mathbf g
-=
-V^\mathsf T\mathbf b
-}
-\]
-
-Then
-
-\[
-\boxed{
-\Delta P_t
-=
--\mathbf g^\mathsf T\mathbf f_t
-}
-\]
-
-with
-
-\[
-\boxed{
-g_i
-=
-\mathbf v_i^\mathsf T\mathbf b
-}
-\]
-
----
-
-## 5. PC1-PC2 Neutral Hedge
-
-PC1-PC2 neutrality:
-
-\[
-\boxed{
-V_2^\mathsf T\mathbf b
-=
-\mathbf 0
-}
-\]
-
-i.e.
-
-\[
-\boxed{
-\mathbf v_1^\mathsf T\mathbf b=0
-}
-\]
-
-\[
-\boxed{
-\mathbf v_2^\mathsf T\mathbf b=0
-}
-\]
-
-Example: 5s7s10s
-
-\[
-\mathbf b
-=
-\begin{pmatrix}
-0\\
-\vdots\\
-b_5\\
-\vdots\\
-b_7\\
-\vdots\\
-b_{10}\\
-\vdots\\
-0
-\end{pmatrix}
-\]
-
-Solve
-
-\[
-V_2^\mathsf T\mathbf b=0
-\]
-
-plus one normalization condition, e.g.
-
-\[
-b_7=1.
-\]
-
-For a 3-leg trade:
-
-\[
-3\text{ weights}
--
-1\text{ scale}
--
-2\text{ hedge constraints}
-=
-0
-\]
-
-remaining degrees of freedom.
+```
 
 Therefore:
 
-\[
-\boxed{
-\text{3-leg + PC1/PC2 hedge}
-\Rightarrow
-\text{unique ratio up to scale}
-}
-\]
-
----
-
-## 6. Remaining PCA Exposure
-
-After hedge:
-
-\[
-\mathbf g
+```math
+Q_2
 =
-V^\mathsf T\mathbf b
-\]
+I
+-
+V_2
+V_2^{\mathrm T}
+```
 
-with
+For any vector \(\mathbf{x}\):
 
-\[
-g_1=g_2=0.
-\]
-
-In general:
-
-\[
-\boxed{
-\mathbf g
+```math
+\mathbf{x}
 =
-\begin{pmatrix}
-0\\
-0\\
-g_3\\
-g_4\\
-\vdots\\
-g_n
-\end{pmatrix}
-}
-\]
+P_2\mathbf{x}
++
+Q_2\mathbf{x}
+```
 
-Hence
+where:
 
-\[
-\boxed{
-PC1/PC2\text{-neutral}
-\neq
-PC3\text{-pure}
-}
-\]
+```math
+P_2\mathbf{x}
+=
+\mathrm{Systematic\ Component}
+```
 
 and
 
-\[
-\boxed{
-\mathbf b
+```math
+Q_2\mathbf{x}
 =
-\sum_{i=3}^{n}
-g_i\mathbf v_i
-}
-\]
+\mathrm{Residual\ Component}
+```
 
 ---
 
-## 7. Variance-Adjusted PCA Risk
+# 5. Residual Subspace
 
-Raw PCA exposure:
+Because:
 
-\[
+```math
+I
+=
+\sum_{i=1}^{n}
+\mathbf{v}_i
+\mathbf{v}_i^{\mathrm T}
+```
+
+we have:
+
+```math
+Q_2
+=
+\sum_{i=3}^{n}
+\mathbf{v}_i
+\mathbf{v}_i^{\mathrm T}
+```
+
+Therefore:
+
+```math
+Q_2\mathbf{x}
+=
+\sum_{i=3}^{n}
+\mathbf{v}_i
+\left(
+\mathbf{v}_i^{\mathrm T}
+\mathbf{x}
+\right)
+```
+
+Residual subspace:
+
+```math
+\mathcal{R}
+=
+\mathrm{span}
+\left(
+\mathbf{v}_1,
+\mathbf{v}_2
+\right)^{\perp}
+```
+
+The framework therefore does not require a trade to be identified with a specific PC3, PC4, ..., PCn.
+
+---
+
+# 6. Daily Residual Innovation
+
+Systematic daily yield move:
+
+```math
+\widehat{\Delta\mathbf{y}}_t
+=
+P_2
+\Delta\mathbf{y}_t
+```
+
+Residual:
+
+```math
+\mathbf{u}_t
+=
+\Delta\mathbf{y}_t
+-
+\widehat{\Delta\mathbf{y}}_t
+```
+
+Therefore:
+
+```math
+\mathbf{u}_t
+=
+Q_2
+\Delta\mathbf{y}_t
+```
+
+or:
+
+```math
+\mathbf{u}_t
+=
+\left(
+I
+-
+V_2V_2^{\mathrm T}
+\right)
+\Delta\mathbf{y}_t
+```
+
+Interpretation:
+
+```math
+\mathbf{u}_t
+=
+\mathrm{Residual\ Innovation}
+```
+
+This measures the part of today's curve movement that cannot be explained by PC1-PC2.
+
+---
+
+# 7. Historical Residual State
+
+Apply the Change-PCA systematic subspace to yield levels:
+
+```math
+\mathbf{R}_t
+=
+Q_2
+\left(
+\mathbf{y}_t
+-
+\mathbf{c}
+\right)
+```
+
+where \(\mathbf{c}\) is an optional reference curve.
+
+If no reference curve is used:
+
+```math
+\mathbf{R}_t
+=
+Q_2
+\mathbf{y}_t
+```
+
+Thus:
+
+```math
+\mathbf{R}_t
+=
+\left(
+I
+-
+V_2V_2^{\mathrm T}
+\right)
+\mathbf{y}_t
+```
+
+Interpretation:
+
+```math
+\mathbf{R}_t
+=
+\mathrm{Residual\ State}
+```
+
+This measures the current yield-curve shape after removing the PC1-PC2 component.
+
+---
+
+# 8. Relationship between State and Innovation
+
+For a fixed PCA basis:
+
+```math
+\mathbf{R}_t
+=
+Q_2\mathbf{y}_t
+```
+
+Then:
+
+```math
+\mathbf{R}_t
+-
+\mathbf{R}_{t-1}
+=
+Q_2
+\left(
+\mathbf{y}_t
+-
+\mathbf{y}_{t-1}
+\right)
+```
+
+Therefore:
+
+```math
+\Delta\mathbf{R}_t
+=
+Q_2
+\Delta\mathbf{y}_t
+```
+
+Hence:
+
+```math
+\Delta\mathbf{R}_t
+=
+\mathbf{u}_t
+```
+
+So:
+
+```math
+\mathbf{R}_t
+=
+\mathrm{Residual\ State}
+```
+
+```math
+\mathbf{u}_t
+=
+\mathrm{Residual\ Innovation}
+```
+
+Methodologically:
+
+```math
+\mathrm{Innovation}
+=
+\Delta
+\left(
+\mathrm{State}
+\right)
+```
+
+---
+
+# 9. Historical Normalization
+
+Historical mean:
+
+```math
+\overline{\mathbf{R}}
+=
+\frac{1}{T}
+\sum_{t=1}^{T}
+\mathbf{R}_t
+```
+
+For tenor \(j\):
+
+```math
+Z_{j,t}
+=
+\frac{
+R_{j,t}
+-
+\overline{R}_j
+}{
+\sigma_j
+}
+```
+
+This is interpreted as historical extremeness, not automatically as fair-value mispricing.
+
+---
+
+# 10. PCA Hedge
+
+Let the signed BPV vector be:
+
+```math
+\mathbf{b}
+=
+\begin{pmatrix}
+b_1 \\
+b_2 \\
+\vdots \\
+b_n
+\end{pmatrix}
+```
+
+First-order P&L:
+
+```math
+\Delta P_t
+\approx
+-
+\mathbf{b}^{\mathrm T}
+\Delta\mathbf{y}_t
+```
+
+Since:
+
+```math
+\Delta\mathbf{y}_t
+=
+V\mathbf{f}_t
+```
+
+we have:
+
+```math
+\Delta P_t
+=
+-
+\mathbf{b}^{\mathrm T}
+V
+\mathbf{f}_t
+```
+
+Define PCA exposure:
+
+```math
+\mathbf{g}
+=
+V^{\mathrm T}
+\mathbf{b}
+```
+
+Therefore:
+
+```math
+\Delta P_t
+=
+-
+\mathbf{g}^{\mathrm T}
+\mathbf{f}_t
+```
+
+For each PC:
+
+```math
 g_i
 =
-\mathbf v_i^\mathsf T\mathbf b
-\]
+\mathbf{v}_i^{\mathrm T}
+\mathbf{b}
+```
 
-is not sufficient for risk comparison.
+---
 
-Because
+# 11. PC1-PC2 Neutral Hedge
 
-\[
-\operatorname{Var}(\mathbf f_t)
+PC1-PC2 neutrality:
+
+```math
+V_2^{\mathrm T}
+\mathbf{b}
 =
-\Lambda,
-\]
+\mathbf{0}
+```
 
-factor \(i\) has variance
+Equivalent to:
 
-\[
-\operatorname{Var}(f_i)
+```math
+\mathbf{v}_1^{\mathrm T}
+\mathbf{b}
 =
-\lambda_i.
-\]
+0
+```
+
+and:
+
+```math
+\mathbf{v}_2^{\mathrm T}
+\mathbf{b}
+=
+0
+```
+
+---
+
+# 12. Example: 5s7s10s Fly
+
+Full BPV vector:
+
+```math
+\mathbf{b}
+=
+\begin{pmatrix}
+0 \\
+\vdots \\
+b_5 \\
+\vdots \\
+b_7 \\
+\vdots \\
+b_{10} \\
+\vdots \\
+0
+\end{pmatrix}
+```
+
+Hedge constraints:
+
+```math
+\mathbf{v}_1^{\mathrm T}
+\mathbf{b}
+=
+0
+```
+
+```math
+\mathbf{v}_2^{\mathrm T}
+\mathbf{b}
+=
+0
+```
+
+Normalization example:
+
+```math
+b_7
+=
+1
+```
+
+For a three-leg trade:
+
+```math
+3
+-
+1
+-
+2
+=
+0
+```
+
+where:
+
+- 3 = leg weights
+- 1 = overall scale
+- 2 = PC hedge constraints
+
+Therefore the hedge ratio is unique up to overall scale.
+
+---
+
+# 13. Remaining PCA Exposure
+
+After PCA hedge:
+
+```math
+\mathbf{g}
+=
+V^{\mathrm T}
+\mathbf{b}
+```
+
+with:
+
+```math
+g_1
+=
+0
+```
+
+```math
+g_2
+=
+0
+```
+
+but generally:
+
+```math
+\mathbf{g}
+=
+\begin{pmatrix}
+0 \\
+0 \\
+g_3 \\
+g_4 \\
+\vdots \\
+g_n
+\end{pmatrix}
+```
+
+Therefore:
+
+```math
+\mathrm{PC1/PC2\ Neutral}
+\neq
+\mathrm{PC3\ Pure}
+```
+
+and:
+
+```math
+\mathbf{b}
+=
+\sum_{i=3}^{n}
+g_i
+\mathbf{v}_i
+```
+
+The position belongs to the residual subspace.
+
+---
+
+# 14. Variance-Adjusted PCA Risk
+
+Raw PC exposure:
+
+```math
+g_i
+=
+\mathbf{v}_i^{\mathrm T}
+\mathbf{b}
+```
+
+does not by itself represent factor risk.
+
+Since:
+
+```math
+\mathrm{Var}
+\left(
+\mathbf{f}_t
+\right)
+=
+\Lambda
+```
+
+we have:
+
+```math
+\mathrm{Var}
+\left(
+f_i
+\right)
+=
+\lambda_i
+```
 
 Portfolio variance:
 
-\[
-\begin{aligned}
-\operatorname{Var}(\Delta P)
-&=
-\mathbf b^\mathsf T
-\Sigma_\Delta
-\mathbf b\\
-&=
-\mathbf b^\mathsf T
-V\Lambda V^\mathsf T
-\mathbf b\\
-&=
-(V^\mathsf T\mathbf b)^\mathsf T
-\Lambda
-(V^\mathsf T\mathbf b)\\
-&=
-\mathbf g^\mathsf T
-\Lambda
-\mathbf g
-\end{aligned}
-\]
+```math
+\mathrm{Var}
+\left(
+\Delta P
+\right)
+=
+\mathbf{b}^{\mathrm T}
+\Sigma_{\Delta}
+\mathbf{b}
+```
 
-Therefore
+Substituting the PCA decomposition:
 
-\[
-\boxed{
-\operatorname{Var}(\Delta P)
+```math
+\mathrm{Var}
+\left(
+\Delta P
+\right)
+=
+\mathbf{b}^{\mathrm T}
+V
+\Lambda
+V^{\mathrm T}
+\mathbf{b}
+```
+
+Using:
+
+```math
+\mathbf{g}
+=
+V^{\mathrm T}
+\mathbf{b}
+```
+
+we obtain:
+
+```math
+\mathrm{Var}
+\left(
+\Delta P
+\right)
+=
+\mathbf{g}^{\mathrm T}
+\Lambda
+\mathbf{g}
+```
+
+Therefore:
+
+```math
+\mathrm{Var}
+\left(
+\Delta P
+\right)
 =
 \sum_{i=1}^{n}
-\lambda_i g_i^2
-}
-\]
-
-Factor variance contribution:
-
-\[
-\boxed{
-RC_i
-=
-\lambda_i g_i^2
-}
-\]
-
-Factor risk contribution share:
-
-\[
-\boxed{
-w_i^{risk}
-=
-\frac{\lambda_i g_i^2}
-{\sum_{j=1}^{n}\lambda_j g_j^2}
-}
-\]
-
-and
-
-\[
-\sum_{i=1}^{n}w_i^{risk}=1.
-\]
-
-For a PC1-PC2-neutral position:
-
-\[
-\boxed{
-\operatorname{Var}(\Delta P)
-=
-\sum_{i=3}^{n}
-\lambda_i g_i^2
-}
-\]
-
-Higher-PC aggregate risk:
-
-\[
-\boxed{
-R_{\text{Residual}}
-=
-\sum_{i=3}^{n}
-\lambda_i g_i^2
-}
-\]
-
-or, after separating PC3:
-
-\[
-\boxed{
-R_{\text{Tail}}
-=
-\sum_{i=4}^{n}
-\lambda_i g_i^2
-}
-\]
-
-PC3 risk share:
-
-\[
-\boxed{
-\rho_3
-=
-\frac{\lambda_3g_3^2}
-{\sum_{i=3}^{n}\lambda_i g_i^2}
-}
-\]
-
-Tail risk share:
-
-\[
-\boxed{
-\rho_{\text{Tail}}
-=
-\frac{
-\sum_{i=4}^{n}\lambda_i g_i^2
-}{
-\sum_{i=3}^{n}\lambda_i g_i^2
-}
-}
-\]
-
-with
-
-\[
-\rho_3+\rho_{\text{Tail}}=1.
-\]
+\lambda_i
+g_i^2
+```
 
 ---
 
-## 8. Higher-PC Instability
+# 15. Factor Variance Contribution
 
-Individual higher PCs may rotate when eigenvalues are close:
+Factor \(i\) variance contribution:
 
-\[
+```math
+RC_i
+=
+\lambda_i
+g_i^2
+```
+
+Total variance:
+
+```math
+RC_{\mathrm{Total}}
+=
+\sum_{i=1}^{n}
+RC_i
+```
+
+or:
+
+```math
+RC_{\mathrm{Total}}
+=
+\sum_{i=1}^{n}
+\lambda_i
+g_i^2
+```
+
+Risk contribution share:
+
+```math
+w_i^{\mathrm{risk}}
+=
+\frac{
+\lambda_i
+g_i^2
+}{
+\sum_{j=1}^{n}
+\lambda_j
+g_j^2
+}
+```
+
+and:
+
+```math
+\sum_{i=1}^{n}
+w_i^{\mathrm{risk}}
+=
+1
+```
+
+For a PC1-PC2-neutral trade:
+
+```math
+\mathrm{Var}
+\left(
+\Delta P
+\right)
+=
+\sum_{i=3}^{n}
+\lambda_i
+g_i^2
+```
+
+---
+
+# 16. Residual Risk
+
+Residual-subspace risk:
+
+```math
+R_{\mathrm{Residual}}
+=
+\sum_{i=3}^{n}
+\lambda_i
+g_i^2
+```
+
+If PC3 is separated:
+
+```math
+R_{\mathrm{Tail}}
+=
+\sum_{i=4}^{n}
+\lambda_i
+g_i^2
+```
+
+PC3 risk share:
+
+```math
+\rho_3
+=
+\frac{
+\lambda_3
+g_3^2
+}{
+\sum_{i=3}^{n}
+\lambda_i
+g_i^2
+}
+```
+
+Tail risk share:
+
+```math
+\rho_{\mathrm{Tail}}
+=
+\frac{
+\sum_{i=4}^{n}
+\lambda_i
+g_i^2
+}{
+\sum_{i=3}^{n}
+\lambda_i
+g_i^2
+}
+```
+
+Therefore:
+
+```math
+\rho_3
++
+\rho_{\mathrm{Tail}}
+=
+1
+```
+
+---
+
+# 17. Higher-PC Instability
+
+If:
+
+```math
 \lambda_i
 \approx
-\lambda_{i+1}.
-\]
+\lambda_{i+1}
+```
 
-However the residual space is
+individual eigenvectors may rotate significantly across estimation samples.
 
-\[
-\boxed{
-\mathcal R
+However, suppose:
+
+```math
+\widetilde{V}_2
 =
-\operatorname{span}
-(\mathbf v_1,\mathbf v_2)^\perp
-}
-\]
+V_2
+R
+```
 
-and
+where \(R\) is orthogonal:
 
-\[
-\boxed{
+```math
+RR^{\mathrm T}
+=
+I
+```
+
+Then:
+
+```math
+\widetilde{P}_2
+=
+\widetilde{V}_2
+\widetilde{V}_2^{\mathrm T}
+```
+
+and:
+
+```math
+\widetilde{P}_2
+=
+V_2
+RR^{\mathrm T}
+V_2^{\mathrm T}
+```
+
+Therefore:
+
+```math
+\widetilde{P}_2
+=
+V_2
+V_2^{\mathrm T}
+```
+
+Hence:
+
+```math
+\widetilde{P}_2
+=
+P_2
+```
+
+and:
+
+```math
+\widetilde{Q}_2
+=
 Q_2
-=
-I-V_2V_2^\mathsf T
-}
-\]
+```
 
-depends only on the top-2 subspace.
+Therefore the relevant stability object is the top-two subspace:
 
-If
-
-\[
-\widetilde V_2
-=
-V_2R
-\]
-
-for orthogonal \(R\),
-
-\[
-RR^\mathsf T=I,
-\]
-
-then
-
-\[
-\widetilde V_2
-\widetilde V_2^\mathsf T
-=
-V_2V_2^\mathsf T.
-\]
-
-Therefore
-
-\[
-\boxed{
-\widetilde P_2=P_2
-}
-\]
-
-and
-
-\[
-\boxed{
-\widetilde Q_2=Q_2
-}
-\]
-
-even if PC1 and PC2 rotate internally.
-
-The relevant stability object is therefore
-
-\[
-\boxed{
-\operatorname{span}(PC1,PC2)
-}
-\]
+```math
+\mathrm{span}
+\left(
+PC1,
+PC2
+\right)
+```
 
 rather than individual higher PCs.
 
 ---
 
-## 9. Multiple PCA Windows
+# 18. PC2-PC3 Boundary
 
-For estimation window \(w\):
+A key diagnostic is the eigenvalue gap:
 
-\[
-\Sigma_\Delta^{(w)}
+```math
+\lambda_2
+-
+\lambda_3
+```
+
+If:
+
+```math
+\lambda_2
+\gg
+\lambda_3
+```
+
+the top-two subspace tends to be more clearly separated.
+
+If:
+
+```math
+\lambda_2
+\approx
+\lambda_3
+```
+
+the distinction between systematic and residual subspaces may become unstable.
+
+---
+
+# 19. Multiple Estimation Windows
+
+For window \(w\):
+
+```math
+\Sigma_{\Delta}^{(w)}
 =
-\operatorname{Cov}^{(w)}
-(\Delta\mathbf y)
-\]
+\mathrm{Cov}^{(w)}
+\left(
+\Delta\mathbf{y}
+\right)
+```
 
-\[
-\Sigma_\Delta^{(w)}
+PCA:
+
+```math
+\Sigma_{\Delta}^{(w)}
 =
 V^{(w)}
 \Lambda^{(w)}
-V^{(w)\mathsf T}
-\]
+V^{(w)\mathrm T}
+```
 
-and
+Systematic projection:
 
-\[
+```math
 P_2^{(w)}
 =
 V_2^{(w)}
-V_2^{(w)\mathsf T}.
-\]
+V_2^{(w)\mathrm T}
+```
 
-Example:
+Residual projection:
 
-\[
+```math
+Q_2^{(w)}
+=
+I
+-
+P_2^{(w)}
+```
+
+Example windows:
+
+```math
 w
 \in
-\{63,126,252,504\}.
-\]
+\{
+63,
+126,
+252,
+504
+\}
+```
 
-Compare
+Compare:
 
-\[
-\boxed{
-P_2^{63},
-P_2^{126},
-P_2^{252},
-P_2^{504}
-}
-\]
+```math
+P_2^{(63)},
+\quad
+P_2^{(126)},
+\quad
+P_2^{(252)},
+\quad
+P_2^{(504)}
+```
 
-rather than only individual eigenvectors.
+rather than only comparing individual eigenvectors.
 
-For hedge vector \(\mathbf b^{(63)}\),
+---
 
-\[
-V_2^{(63)\mathsf T}
-\mathbf b^{(63)}
+# 20. Cross-Model Hedge Robustness
+
+Suppose a hedge vector is constructed using the 63-day PCA:
+
+```math
+V_2^{(63)\mathrm T}
+\mathbf{b}^{(63)}
 =
 0
-\]
+```
 
-but generally
+It does not necessarily satisfy:
 
-\[
-\boxed{
-V_2^{(252)\mathsf T}
-\mathbf b^{(63)}
-\neq0
-}
-\]
+```math
+V_2^{(252)\mathrm T}
+\mathbf{b}^{(63)}
+=
+0
+```
 
-which provides a measure of hedge-model uncertainty.
+Cross-model residual exposure:
+
+```math
+\mathbf{h}^{(63 \rightarrow 252)}
+=
+V_2^{(252)\mathrm T}
+\mathbf{b}^{(63)}
+```
+
+This provides a direct measure of PCA hedge model uncertainty.
 
 ---
 
-## 10. RV Workflow
+# 21. Practical RV Workflow
 
-### A. Structure-First
+## A. Structure-First
 
-\[
-\text{Trade Idea}
-\rightarrow
-\text{Structure}
-\rightarrow
-\boxed{
-V_2^\mathsf T\mathbf b=0
-}
-\rightarrow
-\text{PCA Hedge}
-\]
+Trader identifies a structure:
 
-Example:
-
-\[
+```math
 5s7s10s
+```
+
+Then solve:
+
+```math
+V_2^{\mathrm T}
+\mathbf{b}
+=
+0
+```
+
+Result:
+
+```math
+\mathrm{Trade\ Idea}
 \rightarrow
-\text{PC1/PC2-neutral weights}
-\]
+\mathrm{PCA\ Hedge}
+```
+
+PCA is used only for weight construction.
 
 ---
 
-### B. Daily Distortion Monitor
+## B. Daily Distortion Monitor
 
-\[
-\boxed{
-\mathbf u_t
+Calculate:
+
+```math
+\mathbf{u}_t
 =
-Q_2\Delta\mathbf y_t
-}
-\]
+Q_2
+\Delta\mathbf{y}_t
+```
 
-Detect unusual daily curve movements.
+Use this to identify unusual relative moves.
 
 ---
 
-### C. Historical Residual State
+## C. Historical Residual Monitor
 
-\[
-\boxed{
-\mathbf R_t
+Calculate:
+
+```math
+\mathbf{R}_t
 =
-Q_2(\mathbf y_t-\mathbf c)
-}
-\]
-
-Monitor historical residual curve shape.
-
-With fixed basis:
-
-\[
-\boxed{
-\Delta\mathbf R_t
-=
-\mathbf u_t
-}
-\]
-
----
-
-## 11. Trader Decision Layer
-
-PCA outputs:
-
-\[
-\boxed{
-\mathbf R_t,\quad
-\mathbf u_t,\quad
-\mathbf b,\quad
-\mathbf g,\quad
-\lambda_i g_i^2
-}
-\]
-
-Trade decision:
-
-\[
-E_t[\text{Return}]
-=
-F
+Q_2
 \left(
-\mathbf R_t,
-\mathbf u_t,
-\text{Flow}_t,
-\text{Supply/Demand}_t,
-\text{Macro}_t,
-\text{Policy}_t,
-\text{Liquidity}_t
+\mathbf{y}_t-\mathbf{c}
 \right)
-\]
+```
 
-PCA does not determine:
-
-\[
-\boxed{
-\text{Mean Reversion}
-}
-\]
-
-or
-
-\[
-\boxed{
-\text{Trend Continuation}
-}
-\]
-
-The trader determines the direction.
+Use this to identify historically extreme residual curve shapes.
 
 ---
 
-# 12. Framework Summary
+## D. Joint State / Innovation Monitor
 
-\[
-\boxed{
-\Delta\mathbf y
-\xrightarrow{\operatorname{Cov}}
-\Sigma_\Delta
-\xrightarrow{\operatorname{PCA}}
+Monitor jointly:
+
+```math
+\left(
+\mathbf{R}_t,
+\mathbf{u}_t
+\right)
+```
+
+with:
+
+```math
+\mathbf{u}_t
+=
+\Delta\mathbf{R}_t
+```
+
+---
+
+## E. Trade Selection
+
+Trader chooses a structure based on:
+
+- residual state
+- residual innovation
+- flow
+- supply / demand
+- macro
+- policy
+- liquidity
+- positioning
+
+---
+
+## F. Hedge Construction
+
+For the selected structure:
+
+```math
+V_2^{\mathrm T}
+\mathbf{b}
+=
+0
+```
+
+---
+
+## G. Remaining-Risk Analysis
+
+Calculate:
+
+```math
+\mathbf{g}
+=
+V^{\mathrm T}
+\mathbf{b}
+```
+
+and:
+
+```math
+RC_i
+=
+\lambda_i
+g_i^2
+```
+
+---
+
+# 22. Framework Architecture
+
+```math
+\Delta\mathbf{y}
+\rightarrow
+\Sigma_{\Delta}
+\rightarrow
 V,\Lambda
-}
-\]
+```
 
-\[
-\boxed{
+```math
 V_2
 \rightarrow
-P_2=V_2V_2^\mathsf T
+P_2
+=
+V_2V_2^{\mathrm T}
+```
+
+```math
+P_2
 \rightarrow
-Q_2=I-P_2
-}
-\]
-
-\[
-\boxed{
-\mathbf u_t
+Q_2
 =
-Q_2\Delta\mathbf y_t
-}
-\]
+I-P_2
+```
 
-\[
-\boxed{
-\mathbf R_t
+Daily residual:
+
+```math
+\mathbf{u}_t
 =
-Q_2(\mathbf y_t-\mathbf c)
-}
-\]
+Q_2
+\Delta\mathbf{y}_t
+```
 
-\[
-\boxed{
-\mathbf u_t
+Historical residual:
+
+```math
+\mathbf{R}_t
 =
-\Delta\mathbf R_t
-}
-\]
+Q_2
+\left(
+\mathbf{y}_t-\mathbf{c}
+\right)
+```
 
-Trade structure:
+State / innovation relation:
 
-\[
-\boxed{
-V_2^\mathsf T\mathbf b=0
-}
-\]
+```math
+\Delta\mathbf{R}_t
+=
+\mathbf{u}_t
+```
+
+PCA hedge:
+
+```math
+V_2^{\mathrm T}
+\mathbf{b}
+=
+0
+```
 
 PCA exposure:
 
-\[
-\boxed{
-\mathbf g=V^\mathsf T\mathbf b
-}
-\]
+```math
+\mathbf{g}
+=
+V^{\mathrm T}
+\mathbf{b}
+```
 
-Variance-adjusted risk:
+Variance-adjusted PC risk:
 
-\[
-\boxed{
+```math
 RC_i
 =
-\lambda_i g_i^2
-}
-\]
+\lambda_i
+g_i^2
+```
 
 Total risk:
 
-\[
-\boxed{
-\operatorname{Var}(\Delta P)
+```math
+\mathrm{Var}
+\left(
+\Delta P
+\right)
 =
-\sum_i\lambda_i g_i^2
-}
-\]
+\sum_{i=1}^{n}
+\lambda_i
+g_i^2
+```
 
 ---
 
-# 13. Core Principle
+# 23. Role Separation
 
-\[
-\boxed{
-\text{PCA does not provide the RV answer.}
-}
-\]
+PCA:
 
-\[
-\boxed{
-\text{PCA provides the coordinate system for RV analysis.}
-}
-\]
+```math
+\mathrm{PCA}
+=
+\mathrm{State\ Representation}
++
+\mathrm{Risk\ Decomposition}
++
+\mathrm{Hedge\ Construction}
+```
 
-More specifically:
+Trader:
 
-\[
-\boxed{
-\text{Change PCA}
-\rightarrow
-\text{Systematic Subspace}
-\rightarrow
-\text{Residual Subspace}
-}
-\]
+```math
+\mathrm{Trader}
+=
+\mathrm{Economic\ Interpretation}
++
+\mathrm{Trade\ Direction}
+```
 
-\[
-\boxed{
-\text{Residual State / Innovation}
+PCA does not determine:
+
+```math
+\mathrm{Mean\ Reversion}
+```
+
+or:
+
+```math
+\mathrm{Trend\ Continuation}
+```
+
+---
+
+# 24. Core Principle
+
+```math
+\mathrm{Change\ PCA}
 \rightarrow
-\text{Trader Interpretation}
+\mathrm{Systematic\ Subspace}
 \rightarrow
-\text{Trade Structure}
+\mathrm{Residual\ Subspace}
+```
+
+```math
+\mathrm{Residual\ State}
++
+\mathrm{Residual\ Innovation}
 \rightarrow
-\text{PCA Hedge}
-}
-\]
+\mathrm{Trader\ Interpretation}
+```
+
+```math
+\mathrm{Trader\ Interpretation}
+\rightarrow
+\mathrm{Trade\ Structure}
+\rightarrow
+\mathrm{PCA\ Hedge}
+```
+
+Final principle:
+
+```math
+\mathrm{PCA}
+\neq
+\mathrm{RV\ Answer}
+```
+
+```math
+\mathrm{PCA}
+=
+\mathrm{Coordinate\ System\ for\ RV\ Analysis}
+```

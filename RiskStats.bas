@@ -2,48 +2,44 @@
 Option Explicit
 
 '========================================================
-' RiskStats
-'
-' 複数シート対応
-' 系列単位の欠損処理
-' 共通説明変数による25日回帰
-' 日付照合によるクロスシート回帰
-' Latest列（日付型）
-' 空白行・末尾集計行への対応
-'
-' 出力：
-'
-' A  Sheet
-' B  Trade
-' C  Level
-' D  1d-Chg
-' E  5d-Chg
-' F  25d-Chg
-' G  5d-Zscore
-' H  25d-Zscore
-' I  60d-Zscore
-' J  5d-vol
-' K  25d-vol
-' L  60d-vol
-' M  25d-beta
-' N  R2
-' O  t-value
-' P  Latest
-'
-' 出力シートの既存書式は維持する。
-' P列の表示形式のみ yyyy/mm/dd に設定する。
-'
+' RISKSTATS - USER SETTINGS
 '========================================================
 
 Private Const OUTPUT_SHEET As String = "RiskStats"
 
+' 変化幅
+Private Const CHANGE_1_N As Long = 1
+Private Const CHANGE_5_N As Long = 5
+Private Const CHANGE_25_N As Long = 25
+
+' Z-score
+Private Const ZSCORE_SHORT_N As Long = 5
+Private Const ZSCORE_LONG_N As Long = 25
+
+' High / Low
+Private Const HIGHLOW_SHORT_N As Long = 5
+Private Const HIGHLOW_LONG_N As Long = 25
+
+' Volatility
+Private Const VOLATILITY_N As Long = 25
+
+' Regression
 Private Const REGRESSION_N As Long = 25
 
-Private Const OUTPUT_COLS As Long = 16
+' InputBox初期値
+' Sourceが空欄ならアクティブシート名を使用
+' Explanatory Sheetが空欄なら最初のSourceを使用
+Private Const DEFAULT_SOURCE_SHEETS As String = "JGBData, OISData"
+Private Const DEFAULT_OUTPUT_MULTIPLIER As String = "100"
+Private Const DEFAULT_EXPLANATORY_SHEET As String = "JGBData"
+Private Const DEFAULT_EXPLANATORY_SERIES As String = "yield_10y"
+
+' A:R
+Private Const OUTPUT_COLS As Long = 18
 
 
 '========================================================
-' Main
+' MAIN
 '========================================================
 
 Public Sub BuildRiskStats()
@@ -51,8 +47,11 @@ Public Sub BuildRiskStats()
     Dim sourceInput As String
     Dim normalizedInput As String
 
+    Dim sourceDefault As String
+    Dim explanatoryDefault As String
+
     Dim sheetItems As Variant
-    Dim Item As Variant
+    Dim item As Variant
 
     Dim multiplierInput As String
     Dim outputMultiplier As Double
@@ -88,7 +87,6 @@ Public Sub BuildRiskStats()
     Dim skipped As Long
 
     Dim xChangeMap As Object
-
     Dim results() As Variant
 
     Dim totalSeries As Long
@@ -96,35 +94,54 @@ Public Sub BuildRiskStats()
 
     Dim sheetIndex As Long
     Dim c As Long
-    Dim i As Long
 
-    Dim beta25 As Variant
-    Dim r2_25 As Variant
-    Dim tValue25 As Variant
+    Dim betaValue As Variant
+    Dim r2Value As Variant
+    Dim tValue As Variant
 
+    Dim tradeName As String
     Dim sourceSummary As String
 
     Dim oldScreenUpdating As Boolean
-    Dim screenUpdatingChanged As Boolean
+    Dim oldEnableEvents As Boolean
+    Dim oldAutoFill As Boolean
 
-    Dim oldOutputLastRow As Long
-    Dim clearLastRow As Long
+    Dim stateChanged As Boolean
+    Dim autoFillCaptured As Boolean
+
+    Dim currentStep As String
+    Dim errNumber As Long
+    Dim errText As String
 
     On Error GoTo ErrHandler
 
-    oldScreenUpdating = Application.ScreenUpdating
+    '====================================================
+    ' 1. Settings validation
+    '====================================================
 
+    currentStep = "設定値検証"
+
+    ValidateRiskStatsSettings
 
     '====================================================
-    ' 1. 計算元シート指定
+    ' 2. Source sheets - InputBox
     '====================================================
+
+    currentStep = "計算元シート入力"
+
+    sourceDefault = Trim$(DEFAULT_SOURCE_SHEETS)
+
+    If Len(sourceDefault) = 0 Then
+        sourceDefault = ActiveSheet.Name
+    End If
 
     sourceInput = InputBox( _
         "計算元シートを指定してください。" & vbCrLf & _
         "複数指定はカンマ区切りで入力してください。" & _
         vbCrLf & vbCrLf & _
-        "例：JGB,Swap,Curve", _
-        "RiskStats - 計算元シート")
+        "例：JGBData,OISData", _
+        "RiskStats - 計算元シート", _
+        sourceDefault)
 
     If Len(Trim$(sourceInput)) = 0 Then
         Exit Sub
@@ -139,17 +156,18 @@ Public Sub BuildRiskStats()
 
     sheetItems = Split(normalizedInput, ",")
 
+    '====================================================
+    ' 3. Output multiplier - InputBox
+    '====================================================
 
-    '====================================================
-    ' 2. 出力倍率
-    '====================================================
+    currentStep = "出力倍率入力"
 
     multiplierInput = InputBox( _
         "出力倍率を入力してください。" & vbCrLf & _
         "1 = 元データの単位" & vbCrLf & _
-        "100 = %表記の金利変化をbp表示に変換", _
+        "100 = %表記からbpに変換", _
         "RiskStats - 出力倍率", _
-        "1")
+        DEFAULT_OUTPUT_MULTIPLIER)
 
     If Len(Trim$(multiplierInput)) = 0 Then
         Exit Sub
@@ -164,21 +182,32 @@ Public Sub BuildRiskStats()
 
     outputMultiplier = CDbl(multiplierInput)
 
-    If outputMultiplier <= 0 Then
+    If outputMultiplier <= 0# Then
 
         Err.Raise vbObjectError + 102, , _
-            "出力倍率は0より大きい数値を指定してください。"
+            "出力倍率は0より大きい値を指定してください。"
 
     End If
 
+    '====================================================
+    ' 4. Explanatory sheet - InputBox
+    '====================================================
 
-    '====================================================
-    ' 3. 説明変数シート
-    '====================================================
+    currentStep = "説明変数シート入力"
+
+    explanatoryDefault = Trim$(DEFAULT_EXPLANATORY_SHEET)
+
+    If Len(explanatoryDefault) = 0 Then
+
+        explanatoryDefault = _
+            Trim$(CStr(sheetItems(LBound(sheetItems))))
+
+    End If
 
     explanatorySheetName = InputBox( _
         "回帰説明変数が存在するシート名を入力してください。", _
-        "RiskStats - 説明変数シート")
+        "RiskStats - 説明変数シート", _
+        explanatoryDefault)
 
     If Len(Trim$(explanatorySheetName)) = 0 Then
         Exit Sub
@@ -195,16 +224,16 @@ Public Sub BuildRiskStats()
 
     End If
 
+    '====================================================
+    ' 5. Explanatory series - InputBox
+    '====================================================
 
-    '====================================================
-    ' 4. 説明変数系列
-    '====================================================
+    currentStep = "説明変数系列入力"
 
     explanatoryName = InputBox( _
-        "回帰説明変数とする系列のヘッダー名を入力してください。" & _
-        vbCrLf & vbCrLf & _
-        "例：10Y", _
-        "RiskStats - 説明変数系列")
+        "回帰説明変数のヘッダー名を入力してください。", _
+        "RiskStats - 説明変数系列", _
+        DEFAULT_EXPLANATORY_SERIES)
 
     If Len(Trim$(explanatoryName)) = 0 Then
         Exit Sub
@@ -212,23 +241,22 @@ Public Sub BuildRiskStats()
 
     explanatoryName = Trim$(explanatoryName)
 
+    '====================================================
+    ' 6. Validate source sheets
+    '====================================================
 
-    '====================================================
-    ' 5. 計算元シートの事前確認
-    '====================================================
+    currentStep = "計算元シート検証"
 
     Set sourceSheets = New Collection
 
     Set seenSheets = CreateObject("Scripting.Dictionary")
-
     seenSheets.CompareMode = vbTextCompare
 
     totalSeries = 0
 
+    For Each item In sheetItems
 
-    For Each Item In sheetItems
-
-        sheetName = Trim$(CStr(Item))
+        sheetName = Trim$(CStr(item))
 
         If Len(sheetName) = 0 Then
 
@@ -263,14 +291,12 @@ Public Sub BuildRiskStats()
         If lastCol < 2 Then
 
             Err.Raise vbObjectError + 107, , _
-                "B列以降にデータ系列がありません: " & sheetName
+                "B列以降に系列がありません: " & sheetName
 
         End If
 
         For c = 2 To lastCol
-
             ValidateHeader wsSrc, c
-
         Next c
 
         sourceSheets.Add wsSrc
@@ -278,31 +304,25 @@ Public Sub BuildRiskStats()
         totalSeries = totalSeries + lastCol - 1
 
         If Len(sourceSummary) > 0 Then
-
             sourceSummary = sourceSummary & ", "
-
         End If
 
         sourceSummary = sourceSummary & wsSrc.Name
 
-    Next Item
+    Next item
 
-
-    If totalSeries = 0 Then
+    If totalSeries < 1 Then
 
         Err.Raise vbObjectError + 108, , _
-            "計算対象となる系列が存在しません。"
+            "計算対象系列が存在しません。"
 
     End If
 
+    '====================================================
+    ' 7. Read explanatory data
+    '====================================================
 
-    '====================================================
-    ' 6. 説明変数のデータ取得
-    '
-    ' 指定した1系列だけを抽出する。
-    '
-    ' 他の系列に欠損があっても影響しない。
-    '====================================================
+    currentStep = "説明変数データ取得"
 
     Set wsExp = GetWorksheetOrError(explanatorySheetName)
 
@@ -312,309 +332,1185 @@ Public Sub BuildRiskStats()
     explanatoryCol = FindHeaderColumnOrError( _
         wsExp, explanatoryName, expLastCol)
 
-
     ReadSheetData _
         wsExp, expBlock, expDates, expLastCol
-
 
     BuildSeriesData _
         expBlock, expDates, explanatoryCol, _
         expSeries, expCount, expSkipped
-
-
-    '====================================================
-    ' 回帰説明変数の変化幅を辞書に格納
-    '
-    ' Key:
-    '   開始日|終了日
-    '
-    ' Value:
-    '   説明変数の変化幅
-    '
-    ' 日付区間が一致する変化幅だけを回帰に使用する。
-    '====================================================
 
     Set xChangeMap = CreateObject("Scripting.Dictionary")
 
     BuildChangeMap _
         expSeries, expCount, xChangeMap
 
-
     '====================================================
-    ' 7. 出力配列
+    ' 8. Calculate all series in memory
     '
-    ' 全系列を計算してからRiskStatsに書き込む。
+    ' 出力シートにはまだ触れない。
     '====================================================
+
+    currentStep = "RiskStats計算"
 
     ReDim results(1 To totalSeries, 1 To OUTPUT_COLS)
 
     outputIndex = 0
 
-
-    '====================================================
-    ' 8. 各計算元シート
-    '====================================================
-
     For sheetIndex = 1 To sourceSheets.Count
 
         Set wsSrc = sourceSheets(sheetIndex)
 
-
-        '--------------------------------------------
-        ' シート全体を取得
-        '
-        ' 日付列は共通だが、各系列の有効観測は
-        ' それぞれ独立に構築する。
-        '--------------------------------------------
-
         ReadSheetData _
             wsSrc, srcBlock, srcDates, lastCol
-
-
-        '================================================
-        ' 各系列
-        '================================================
 
         For c = 2 To lastCol
 
             outputIndex = outputIndex + 1
 
-
-            '--------------------------------------------
-            ' この系列だけの有効観測を作成
-            '
-            ' 他の列の欠損は判定しない。
-            '--------------------------------------------
-
             BuildSeriesData _
                 srcBlock, srcDates, c, _
                 srcSeries, seriesCount, skipped
 
+            tradeName = CStr(wsSrc.Cells(1, c).value2)
 
-            '--------------------------------------------
             ' A: Sheet
-            '--------------------------------------------
-
             results(outputIndex, 1) = wsSrc.Name
 
-
-            '--------------------------------------------
             ' B: Trade
-            '--------------------------------------------
+            results(outputIndex, 2) = tradeName
 
-            results(outputIndex, 2) = _
-                wsSrc.Cells(1, c).value2
-
-
-            '--------------------------------------------
             ' C: Level
-            '--------------------------------------------
-
             results(outputIndex, 3) = _
                 LatestLevel( _
                     srcSeries, seriesCount, outputMultiplier)
 
-
-            '--------------------------------------------
-            ' D:F Changes
-            '--------------------------------------------
-
+            ' D: 1d-Chg
             results(outputIndex, 4) = _
                 ChangeN( _
                     srcSeries, seriesCount, _
-                    1, outputMultiplier)
+                    CHANGE_1_N, outputMultiplier)
 
+            ' E: 5d-Chg
             results(outputIndex, 5) = _
                 ChangeN( _
                     srcSeries, seriesCount, _
-                    5, outputMultiplier)
+                    CHANGE_5_N, outputMultiplier)
 
+            ' F: 25d-Chg
             results(outputIndex, 6) = _
                 ChangeN( _
                     srcSeries, seriesCount, _
-                    25, outputMultiplier)
+                    CHANGE_25_N, outputMultiplier)
 
-
-            '--------------------------------------------
-            ' G:I Z-score
-            '--------------------------------------------
-
+            ' G: 5d-Zscore
             results(outputIndex, 7) = _
-                ZScoreLevel(srcSeries, seriesCount, 5)
+                ZScoreLevel( _
+                    srcSeries, seriesCount, ZSCORE_SHORT_N)
 
+            ' H: 5d-High
             results(outputIndex, 8) = _
-                ZScoreLevel(srcSeries, seriesCount, 25)
+                HighLowLevel( _
+                    srcSeries, seriesCount, _
+                    HIGHLOW_SHORT_N, outputMultiplier, True)
 
+            ' I: 5d-Low
             results(outputIndex, 9) = _
-                ZScoreLevel(srcSeries, seriesCount, 60)
+                HighLowLevel( _
+                    srcSeries, seriesCount, _
+                    HIGHLOW_SHORT_N, outputMultiplier, False)
 
-
-            '--------------------------------------------
-            ' J:L Vol
-            '--------------------------------------------
-
+            ' J: 25d-Zscore
             results(outputIndex, 10) = _
-                VolDailyChange( _
-                    srcSeries, seriesCount, _
-                    5, outputMultiplier)
+                ZScoreLevel( _
+                    srcSeries, seriesCount, ZSCORE_LONG_N)
 
+            ' K: 25d-High
             results(outputIndex, 11) = _
-                VolDailyChange( _
+                HighLowLevel( _
                     srcSeries, seriesCount, _
-                    25, outputMultiplier)
+                    HIGHLOW_LONG_N, outputMultiplier, True)
 
+            ' L: 25d-Low
             results(outputIndex, 12) = _
+                HighLowLevel( _
+                    srcSeries, seriesCount, _
+                    HIGHLOW_LONG_N, outputMultiplier, False)
+
+            ' M: 25d-vol
+            results(outputIndex, 13) = _
                 VolDailyChange( _
                     srcSeries, seriesCount, _
-                    60, outputMultiplier)
+                    VOLATILITY_N, outputMultiplier)
 
-
-            '--------------------------------------------
-            ' M:O Cross-sheet regression
-            '
-            ' この系列と共通説明変数について、
-            ' 日付区間が一致する変化幅を使用。
-            '--------------------------------------------
-
+            ' N:P Regression
             Regression25DailyChangeCrossSheet _
                 srcSeries, seriesCount, _
                 xChangeMap, _
-                beta25, r2_25, tValue25
+                betaValue, r2Value, tValue
 
+            results(outputIndex, 14) = betaValue
+            results(outputIndex, 15) = r2Value
+            results(outputIndex, 16) = tValue
 
-            results(outputIndex, 13) = beta25
-            results(outputIndex, 14) = r2_25
-            results(outputIndex, 15) = tValue25
-
-
-            '--------------------------------------------
-            ' P: Latest
-            '
-            ' この系列における最新の有効日付。
-            '
-            ' 全観測が欠損している系列はNA。
-            '--------------------------------------------
-
+            ' Q: Latest
             If seriesCount > 0 Then
 
-                results(outputIndex, 16) = _
+                results(outputIndex, 17) = _
                     CDbl(srcSeries(1, seriesCount))
 
             Else
 
-                results(outputIndex, 16) = "NA"
+                results(outputIndex, 17) = "NA"
 
             End If
+
+            ' R: Type
+            results(outputIndex, 18) = _
+                ClassifyRiskStatsTradeType(tradeName)
 
         Next c
 
     Next sheetIndex
 
+    If outputIndex <> totalSeries Then
+
+        Err.Raise vbObjectError + 110, , _
+            "計算結果の行数が一致しません。"
+
+    End If
 
     '====================================================
-    ' 9. RiskStatsへ一括出力
-    '
-    ' すべての計算が完了してから実行する。
+    ' 9. Preserve Excel application settings
     '====================================================
+
+    currentStep = "Excel設定退避"
+
+    oldScreenUpdating = Application.ScreenUpdating
+    oldEnableEvents = Application.EnableEvents
+
+    stateChanged = True
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    ' Excelテーブルの計算列自動補完を一時停止
+    On Error Resume Next
+
+    Err.Clear
+
+    oldAutoFill = _
+        Application.AutoCorrect.AutoFillFormulasInLists
+
+    autoFillCaptured = (Err.Number = 0)
+
+    If autoFillCaptured Then
+
+        Application.AutoCorrect.AutoFillFormulasInLists = False
+
+    End If
+
+    On Error GoTo ErrHandler
+
+    '====================================================
+    ' 10. Output
+    '
+    ' フィルター条件をクリアしてから更新。
+    '====================================================
+
+    currentStep = "RiskStats出力"
 
     Set wsOut = GetOrCreateWorksheet(OUTPUT_SHEET)
 
-    oldOutputLastRow = wsOut.Cells( _
-        wsOut.rows.Count, 1).End(xlUp).Row
-
-    clearLastRow = Application.WorksheetFunction.Max( _
-        oldOutputLastRow, totalSeries + 1)
-
-
-    Application.ScreenUpdating = False
-
-    screenUpdatingChanged = True
-
-
-    '--------------------------------------------
-    ' 既存書式を維持したまま内容だけ削除
-    '--------------------------------------------
-
-    wsOut.Range( _
-        wsOut.Cells(1, 1), _
-        wsOut.Cells(clearLastRow, OUTPUT_COLS) _
-    ).ClearContents
-
-
-    '--------------------------------------------
-    ' ヘッダー
-    '--------------------------------------------
-
-    WriteHeaders wsOut
-
-
-    '--------------------------------------------
-    ' 計算結果
-    '--------------------------------------------
-
-    wsOut.Range("A2").Resize( _
-        totalSeries, OUTPUT_COLS).value2 = results
-
+    WriteRiskStatsSafely _
+        wsOut, results, totalSeries
 
     '====================================================
-    ' 10. Latest列の日付表示形式
-    '
-    ' P列のみ設定
+    ' 11. Restore Excel settings
     '====================================================
 
-    wsOut.Range( _
-        "P2:P" & CStr(totalSeries + 1) _
-    ).numberFormat = "yyyy/mm/dd"
+    If autoFillCaptured Then
 
+        Application.AutoCorrect.AutoFillFormulasInLists = _
+            oldAutoFill
 
+    End If
+
+    Application.EnableEvents = oldEnableEvents
     Application.ScreenUpdating = oldScreenUpdating
 
-    screenUpdatingChanged = False
-
+    stateChanged = False
 
     MsgBox _
-        "RiskStatsの作成が完了しました。" & _
-        vbCrLf & vbCrLf & _
-        "計算元シート: " & sourceSummary & vbCrLf & _
-        "対象系列数: " & totalSeries & vbCrLf & _
-        "出力倍率: " & outputMultiplier & vbCrLf & _
-        "回帰説明変数: " & _
-        wsExp.Name & "!" & explanatoryName & vbCrLf & vbCrLf & _
-        "欠損値は系列ごとに除外して計算しました。", _
+        "RiskStatsの更新が完了しました。" & vbCrLf & _
+        "計算元: " & sourceSummary & vbCrLf & _
+        "系列数: " & totalSeries & vbCrLf & _
+        "説明変数: " & _
+        wsExp.Name & "!" & explanatoryName & vbCrLf & _
+        "フィルター条件: クリア" & vbCrLf & _
+        "データ照合: PASS", _
         vbInformation
 
     Exit Sub
 
-
 ErrHandler:
 
-    If screenUpdatingChanged Then
+    errNumber = Err.Number
+    errText = Err.Description
 
+    On Error Resume Next
+
+    If stateChanged Then
+
+        If autoFillCaptured Then
+
+            Application.AutoCorrect.AutoFillFormulasInLists = _
+                oldAutoFill
+
+        End If
+
+        Application.EnableEvents = oldEnableEvents
         Application.ScreenUpdating = oldScreenUpdating
 
     End If
 
+    On Error GoTo 0
+
     MsgBox _
-        "RiskStats作成中にエラーが発生しました。" & _
-        vbCrLf & vbCrLf & _
-        Err.Description, _
+        "RiskStats更新エラー" & vbCrLf & _
+        "処理: " & currentStep & vbCrLf & _
+        "Err.Number: " & CStr(errNumber) & vbCrLf & _
+        errText, _
         vbCritical
 
 End Sub
 
 
 '========================================================
-' シートデータ取得
+' CLEAR FILTER CRITERIA
 '
-' 日付列の有効性を判定する。
+' 今回の主要修正
 '
-' 数値系列の欠損判定はここでは行わない。
-' 各系列のBuildSeriesDataで独立に処理する。
+' ・Excelテーブルのフィルターをクリア
+' ・通常のAutoFilterもクリア
+' ・フィルターの▼は残す
+' ・抽出条件は復元しない
+' ・並べ替え条件は変更しない
+'========================================================
+
+Private Sub ClearRiskStatsFilters( _
+    ByVal ws As Worksheet _
+)
+
+    Dim tbl As ListObject
+
+    '====================================================
+    ' 1. Excelテーブル
+    '====================================================
+
+    For Each tbl In ws.ListObjects
+
+        If tbl.ShowAutoFilter Then
+
+            If tbl.AutoFilter.FilterMode Then
+
+                tbl.AutoFilter.ShowAllData
+
+            End If
+
+        End If
+
+    Next tbl
+
+    '====================================================
+    ' 2. 通常のシートAutoFilter
+    '====================================================
+
+    If ws.FilterMode Then
+
+        ws.ShowAllData
+
+    End If
+
+    '====================================================
+    ' 3. フィルター解除を確認
+    '====================================================
+
+    For Each tbl In ws.ListObjects
+
+        If tbl.ShowAutoFilter Then
+
+            If tbl.AutoFilter.FilterMode Then
+
+                Err.Raise vbObjectError + 700, , _
+                    "テーブルのフィルター条件を" & _
+                    "クリアできませんでした: " & tbl.Name
+
+            End If
+
+        End If
+
+    Next tbl
+
+    If ws.FilterMode Then
+
+        Err.Raise vbObjectError + 701, , _
+            "ワークシートのフィルター条件を" & _
+            "クリアできませんでした。"
+
+    End If
+
+End Sub
+
+
+'========================================================
+' SAFE OUTPUT
 '
-' dates(r)
-'   > 0 : 有効な日付
-'   = 0 : 空白行・集計行等
+' 通常範囲とExcelテーブルの両方に対応。
 '
+' 重要：
+'   フィルターを先にクリアする。
+'   データ行全体を更新する。
+'   NumberFormatを変更しない。
+'   AutoFilterModeをFalseにしない。
+'   フィルター条件を復元しない。
+'========================================================
+
+Private Sub WriteRiskStatsSafely( _
+    ByVal ws As Worksheet, _
+    ByRef results() As Variant, _
+    ByVal resultCount As Long _
+)
+
+    Dim tbl As ListObject
+    Dim candidate As ListObject
+
+    Dim oldLastRow As Long
+    Dim clearLastRow As Long
+    Dim targetLastRow As Long
+
+    Dim outputRange As Range
+    Dim conflictingRange As Range
+
+    If resultCount < 1 Then
+
+        Err.Raise vbObjectError + 702, , _
+            "出力対象となる系列がありません。"
+
+    End If
+
+    If ws.ProtectContents Then
+
+        Err.Raise vbObjectError + 703, , _
+            "RiskStatsシートが保護されています。"
+
+    End If
+
+    targetLastRow = resultCount + 1
+
+    '====================================================
+    ' 1. Filter criteriaをクリア
+    '
+    ' これにより全行が表示される。
+    '====================================================
+
+    ClearRiskStatsFilters ws
+
+    '====================================================
+    ' 2. Last used row
+    '====================================================
+
+    oldLastRow = RiskStatsLastUsedRow(ws)
+
+    clearLastRow = Application.Max( _
+        oldLastRow, targetLastRow)
+
+    '====================================================
+    ' 3. Excelテーブルの有無を判定
+    '====================================================
+
+    Set tbl = Nothing
+
+    For Each candidate In ws.ListObjects
+
+        If candidate.Range.Row = 1 And _
+           candidate.Range.Column = 1 Then
+
+            Set tbl = candidate
+
+            Exit For
+
+        End If
+
+    Next candidate
+
+    '====================================================
+    ' 4. 他のテーブルとの重複を確認
+    '
+    ' RiskStats出力範囲に別のテーブルがある場合、
+    ' 他データを破壊しないよう中止する。
+    '====================================================
+
+    Set outputRange = ws.Range( _
+        ws.Cells(1, 1), _
+        ws.Cells(clearLastRow, OUTPUT_COLS))
+
+    For Each candidate In ws.ListObjects
+
+        If tbl Is Nothing Then
+
+            Set conflictingRange = _
+                Application.Intersect( _
+                    candidate.Range, outputRange)
+
+            If Not conflictingRange Is Nothing Then
+
+                Err.Raise vbObjectError + 704, , _
+                    "RiskStats出力領域に別のExcelテーブルがあります: " & _
+                    candidate.Name
+
+            End If
+
+        ElseIf Not candidate Is tbl Then
+
+            Set conflictingRange = _
+                Application.Intersect( _
+                    candidate.Range, outputRange)
+
+            If Not conflictingRange Is Nothing Then
+
+                Err.Raise vbObjectError + 705, , _
+                    "RiskStats出力領域に別のExcelテーブルがあります: " & _
+                    candidate.Name
+
+            End If
+
+        End If
+
+        Set conflictingRange = Nothing
+
+    Next candidate
+
+    '====================================================
+    ' 5A. 通常のセル範囲
+    '====================================================
+
+    If tbl Is Nothing Then
+
+        '--------------------------------------------
+        ' ヘッダーを残し、2行目以降を削除
+        '--------------------------------------------
+
+        ws.Range( _
+            ws.Cells(2, 1), _
+            ws.Cells(clearLastRow, OUTPUT_COLS) _
+        ).ClearContents
+
+        '--------------------------------------------
+        ' ヘッダーを更新
+        '--------------------------------------------
+
+        WriteHeaders ws
+
+        '--------------------------------------------
+        ' 計算結果を全行へ書き込み
+        '--------------------------------------------
+
+        ws.Cells(2, 1).Resize( _
+            resultCount, OUTPUT_COLS).value2 = results
+
+    Else
+
+        '================================================
+        ' 5B. Excelテーブル
+        '================================================
+
+        If Not tbl.ShowHeaders Then
+
+            Err.Raise vbObjectError + 706, , _
+                "RiskStatsテーブルのヘッダーが非表示です。"
+
+        End If
+
+        If tbl.ShowTotals Then
+
+            Err.Raise vbObjectError + 707, , _
+                "RiskStatsテーブルに集計行があります。" & _
+                "集計行を保護するため更新を中止しました。"
+
+        End If
+
+        If tbl.ListColumns.Count > OUTPUT_COLS Then
+
+            Err.Raise vbObjectError + 708, , _
+                "RiskStatsテーブルが18列を超えています。" & _
+                "追加列を保護するため更新を中止しました。"
+
+        End If
+
+        '--------------------------------------------
+        ' 既存テーブルの全データを消去
+        '
+        ' フィルターはすでにクリア済み。
+        '--------------------------------------------
+
+        If Not tbl.DataBodyRange Is Nothing Then
+
+            tbl.DataBodyRange.ClearContents
+
+        End If
+
+        '--------------------------------------------
+        ' テーブルのサイズを計算結果に合わせる
+        '
+        ' A1:R(resultCount+1)
+        '
+        ' フィルター機能は維持する。
+        '--------------------------------------------
+
+        If tbl.Range.rows.Count <> resultCount + 1 Or _
+           tbl.Range.Columns.Count <> OUTPUT_COLS Then
+
+            tbl.Resize ws.Range( _
+                ws.Cells(1, 1), _
+                ws.Cells(targetLastRow, OUTPUT_COLS))
+
+        End If
+
+        '--------------------------------------------
+        ' Resize後のデータ領域を確認
+        '--------------------------------------------
+
+        If tbl.DataBodyRange Is Nothing Then
+
+            Err.Raise vbObjectError + 709, , _
+                "テーブルのデータ領域を取得できません。"
+
+        End If
+
+        If tbl.DataBodyRange.rows.Count <> resultCount Or _
+           tbl.DataBodyRange.Columns.Count <> OUTPUT_COLS Then
+
+            Err.Raise vbObjectError + 710, , _
+                "テーブルのサイズが計算結果と一致しません。"
+
+        End If
+
+        '--------------------------------------------
+        ' Resizeで生成された既定値や数式も削除
+        '--------------------------------------------
+
+        tbl.DataBodyRange.ClearContents
+
+        '--------------------------------------------
+        ' ヘッダー更新
+        '--------------------------------------------
+
+        WriteHeaders ws
+
+        '--------------------------------------------
+        ' 計算結果をテーブル全体に一括書き込み
+        '--------------------------------------------
+
+        tbl.DataBodyRange.value2 = results
+
+    End If
+
+    '====================================================
+    ' 6. 古い結果が残った行を消去
+    '
+    ' 新しい系列数が減った場合に必要。
+    '====================================================
+
+    If clearLastRow > targetLastRow Then
+
+        ws.Range( _
+            ws.Cells(targetLastRow + 1, 1), _
+            ws.Cells(clearLastRow, OUTPUT_COLS) _
+        ).ClearContents
+
+    End If
+
+    '====================================================
+    ' 7. 書き込み結果を検証
+    '
+    ' フィルター条件は復元しない。
+    '====================================================
+
+    VerifyRiskStatsOutput _
+        ws, results, resultCount
+
+End Sub
+
+
+'========================================================
+' LAST USED ROW
+'
+' A列だけでなくA:R全列から取得する。
+'========================================================
+
+Private Function RiskStatsLastUsedRow( _
+    ByVal ws As Worksheet _
+) As Long
+
+    Dim searchRange As Range
+    Dim foundCell As Range
+
+    Set searchRange = ws.Range( _
+        ws.Cells(1, 1), _
+        ws.Cells(ws.rows.Count, OUTPUT_COLS))
+
+    Set foundCell = searchRange.Find( _
+        What:="*", _
+        After:=searchRange.Cells(1, 1), _
+        LookIn:=xlFormulas, _
+        LookAt:=xlPart, _
+        SearchOrder:=xlByRows, _
+        SearchDirection:=xlPrevious, _
+        MatchCase:=False, _
+        SearchFormat:=False)
+
+    If foundCell Is Nothing Then
+
+        RiskStatsLastUsedRow = 1
+
+    Else
+
+        RiskStatsLastUsedRow = foundCell.Row
+
+    End If
+
+End Function
+
+
+'========================================================
+' VERIFY OUTPUT
+'
+' 1. まず各セルを元配列と比較
+' 2. 不一致の場合は行順に依存しない比較
+' 3. レコードの内容が異なればエラー
+'
+' Excelテーブルの並べ替えで行順が変わっても、
+' 全レコードが一致すればPASSとする。
+'========================================================
+
+Private Sub VerifyRiskStatsOutput( _
+    ByVal ws As Worksheet, _
+    ByRef expected() As Variant, _
+    ByVal n As Long _
+)
+
+    Dim actual As Variant
+
+    Dim i As Long
+    Dim j As Long
+
+    Dim mismatchRow As Long
+    Dim mismatchCol As Long
+
+    Dim positionMatches As Boolean
+    Dim recordMatches As Boolean
+
+    Dim expectedCounts As Object
+    Dim rowKey As String
+    Dim key As Variant
+
+    Dim actualText As String
+    Dim expectedText As String
+
+    Dim formulaCells As Range
+    Dim sourceRange As Range
+
+    Set sourceRange = ws.Cells(2, 1).Resize( _
+        n, OUTPUT_COLS)
+
+    '====================================================
+    ' 数式が残っていないか確認
+    '====================================================
+
+    Set formulaCells = Nothing
+
+    On Error Resume Next
+
+    Set formulaCells = sourceRange.SpecialCells( _
+        xlCellTypeFormulas)
+
+    On Error GoTo 0
+
+    If Not formulaCells Is Nothing Then
+
+        Err.Raise vbObjectError + 720, , _
+            "RiskStats出力領域に数式が残っています。" & _
+            vbCrLf & _
+            "Cell: " & _
+            formulaCells.Cells(1, 1).Address(False, False)
+
+    End If
+
+    actual = sourceRange.value2
+
+    '====================================================
+    ' 1. 行・列位置で比較
+    '====================================================
+
+    positionMatches = True
+
+    For i = 1 To n
+
+        For j = 1 To OUTPUT_COLS
+
+            If Not RiskStatsValuesEqual( _
+                expected(i, j), actual(i, j)) Then
+
+                positionMatches = False
+
+                mismatchRow = i
+                mismatchCol = j
+
+                Exit For
+
+            End If
+
+        Next j
+
+        If Not positionMatches Then Exit For
+
+    Next i
+
+    If positionMatches Then Exit Sub
+
+    '====================================================
+    ' 2. レコード集合で比較
+    '
+    ' 同じレコードが複数存在しても正しく照合する。
+    '====================================================
+
+    Set expectedCounts = _
+        CreateObject("Scripting.Dictionary")
+
+    expectedCounts.CompareMode = vbBinaryCompare
+
+    For i = 1 To n
+
+        rowKey = RiskStatsRowSignature(expected, i)
+
+        If expectedCounts.Exists(rowKey) Then
+
+            expectedCounts(rowKey) = _
+                CLng(expectedCounts(rowKey)) + 1
+
+        Else
+
+            expectedCounts.Add rowKey, 1
+
+        End If
+
+    Next i
+
+    recordMatches = True
+
+    For i = 1 To n
+
+        rowKey = RiskStatsRowSignature(actual, i)
+
+        If Not expectedCounts.Exists(rowKey) Then
+
+            recordMatches = False
+            Exit For
+
+        End If
+
+        If CLng(expectedCounts(rowKey)) <= 0 Then
+
+            recordMatches = False
+            Exit For
+
+        End If
+
+        expectedCounts(rowKey) = _
+            CLng(expectedCounts(rowKey)) - 1
+
+    Next i
+
+    If recordMatches Then
+
+        For Each key In expectedCounts.keys
+
+            If CLng(expectedCounts(key)) <> 0 Then
+
+                recordMatches = False
+                Exit For
+
+            End If
+
+        Next key
+
+    End If
+
+    If recordMatches Then Exit Sub
+
+    '====================================================
+    ' 3. 本当のデータ不一致
+    '====================================================
+
+    expectedText = RiskStatsDisplayValue( _
+        expected(mismatchRow, mismatchCol))
+
+    actualText = RiskStatsDisplayValue( _
+        actual(mismatchRow, mismatchCol))
+
+    Err.Raise vbObjectError + 721, , _
+        "出力内容が計算結果と一致しません。" & _
+        vbCrLf & _
+        "最初の位置不一致: " & _
+        ws.Cells( _
+            mismatchRow + 1, _
+            mismatchCol).Address(False, False) & _
+        vbCrLf & _
+        "期待値: " & expectedText & _
+        vbCrLf & _
+        "実際値: " & actualText & _
+        vbCrLf & _
+        "全レコード照合も不一致です。"
+
+End Sub
+
+
+'========================================================
+' VALUE COMPARISON
+'========================================================
+
+Private Function RiskStatsValuesEqual( _
+    ByVal expected As Variant, _
+    ByVal actual As Variant _
+) As Boolean
+
+    Dim x As Double
+    Dim y As Double
+    Dim tolerance As Double
+
+    RiskStatsValuesEqual = False
+
+    If IsError(expected) Or IsError(actual) Then
+        Exit Function
+    End If
+
+    If VarType(expected) = vbString Then
+
+        If VarType(actual) <> vbString Then
+            Exit Function
+        End If
+
+        RiskStatsValuesEqual = _
+            (StrComp( _
+                CStr(expected), _
+                CStr(actual), _
+                vbBinaryCompare) = 0)
+
+        Exit Function
+
+    End If
+
+    If Not IsNumeric(actual) Then Exit Function
+
+    x = CDbl(expected)
+    y = CDbl(actual)
+
+    tolerance = 0.0000000001 * _
+        Application.Max(1#, Abs(x))
+
+    RiskStatsValuesEqual = _
+        (Abs(x - y) <= tolerance)
+
+End Function
+
+
+'========================================================
+' ROW SIGNATURE
+'========================================================
+
+Private Function RiskStatsRowSignature( _
+    ByRef arr As Variant, _
+    ByVal rowIndex As Long _
+) As String
+
+    Dim j As Long
+    Dim token As String
+    Dim signature As String
+
+    signature = vbNullString
+
+    For j = 1 To OUTPUT_COLS
+
+        token = RiskStatsValueSignature( _
+            arr(rowIndex, j))
+
+        signature = signature & _
+            CStr(Len(token)) & ":" & token & "|"
+
+    Next j
+
+    RiskStatsRowSignature = signature
+
+End Function
+
+
+'========================================================
+' VALUE SIGNATURE
+'========================================================
+
+Private Function RiskStatsValueSignature( _
+    ByVal v As Variant _
+) As String
+
+    If IsError(v) Then
+
+        RiskStatsValueSignature = "ERROR"
+        Exit Function
+
+    End If
+
+    If IsNull(v) Then
+
+        RiskStatsValueSignature = "NULL"
+        Exit Function
+
+    End If
+
+    If IsEmpty(v) Then
+
+        RiskStatsValueSignature = "EMPTY"
+        Exit Function
+
+    End If
+
+    If VarType(v) = vbString Then
+
+        RiskStatsValueSignature = "S:" & CStr(v)
+
+        Exit Function
+
+    End If
+
+    If IsNumeric(v) Then
+
+        RiskStatsValueSignature = _
+            "N:" & Format$( _
+                CDbl(v), _
+                "0.00000000000000E+000")
+
+        Exit Function
+
+    End If
+
+    RiskStatsValueSignature = "OTHER:" & CStr(v)
+
+End Function
+
+
+'========================================================
+' DISPLAY VALUE FOR ERROR
+'========================================================
+
+Private Function RiskStatsDisplayValue( _
+    ByVal v As Variant _
+) As String
+
+    If IsError(v) Then
+
+        RiskStatsDisplayValue = "[Excel Error]"
+
+    ElseIf IsNull(v) Then
+
+        RiskStatsDisplayValue = "[Null]"
+
+    ElseIf IsEmpty(v) Then
+
+        RiskStatsDisplayValue = "[Empty]"
+
+    Else
+
+        RiskStatsDisplayValue = CStr(v)
+
+    End If
+
+    If Len(RiskStatsDisplayValue) > 100 Then
+
+        RiskStatsDisplayValue = _
+            Left$(RiskStatsDisplayValue, 100) & "..."
+
+    End If
+
+End Function
+
+
+'========================================================
+' TRADE TYPE CLASSIFICATION
+'
+' Outright:
+'   10y, 1m, yield_10y, JN123
+'
+' Curve:
+'   1s2s, 3m6m, 3m1s
+'
+' Fly:
+'   1m2m3m, 5s7s10s
+'========================================================
+
+Private Function ClassifyRiskStatsTradeType( _
+    ByVal tradeName As String _
+) As String
+
+    Dim s As String
+    Dim re As Object
+    Dim tickerRe As Object
+    Dim matches As Object
+
+    On Error GoTo Fail
+
+    ClassifyRiskStatsTradeType = "NA"
+
+    s = LCase$(Trim$(tradeName))
+
+    s = Replace(s, " ", "")
+    s = Replace(s, "　", "")
+    s = Replace(s, vbTab, "")
+    s = Replace(s, vbCr, "")
+    s = Replace(s, vbLf, "")
+
+    If Len(s) = 0 Then Exit Function
+
+    ' Prefix
+    If Left$(s, 6) = "yield_" Then
+
+        s = mid$(s, 7)
+
+    ElseIf Left$(s, 5) = "rate_" Then
+
+        s = mid$(s, 6)
+
+    ElseIf Left$(s, 4) = "jgb_" Then
+
+        s = mid$(s, 5)
+
+    ElseIf Left$(s, 3) = "jgb" Then
+
+        s = mid$(s, 4)
+
+    End If
+
+    If Len(s) = 0 Then Exit Function
+
+    ' JGB銘柄識別子
+    Set tickerRe = CreateObject("VBScript.RegExp")
+
+    tickerRe.Global = False
+    tickerRe.IgnoreCase = True
+
+    tickerRe.pattern = _
+        "^(jn|js|jb|jl|jx|ju)[0-9]+$"
+
+    If tickerRe.Test(s) Then
+
+        ClassifyRiskStatsTradeType = "Outright"
+        Exit Function
+
+    End If
+
+    ' Tenor pattern
+    Set re = CreateObject("VBScript.RegExp")
+
+    re.Global = False
+    re.IgnoreCase = True
+
+    re.pattern = _
+        "^[0-9]+(\.[0-9]+)?[mys]" & _
+        "([/_-]?[0-9]+(\.[0-9]+)?[mys]){0,2}$"
+
+    If Not re.Test(s) Then Exit Function
+
+    re.Global = True
+    re.pattern = "[0-9]+(\.[0-9]+)?[mys]"
+
+    Set matches = re.Execute(s)
+
+    Select Case matches.Count
+
+        Case 1
+            ClassifyRiskStatsTradeType = "Outright"
+
+        Case 2
+            ClassifyRiskStatsTradeType = "Curve"
+
+        Case 3
+            ClassifyRiskStatsTradeType = "Fly"
+
+    End Select
+
+    Exit Function
+
+Fail:
+
+    ClassifyRiskStatsTradeType = "NA"
+
+End Function
+
+
+'========================================================
+' SETTINGS VALIDATION
+'========================================================
+
+Private Sub ValidateRiskStatsSettings()
+
+    If CHANGE_1_N < 1 Or _
+       CHANGE_5_N < 1 Or _
+       CHANGE_25_N < 1 Then
+
+        Err.Raise vbObjectError + 200, , _
+            "Change期間は1以上にしてください。"
+
+    End If
+
+    If ZSCORE_SHORT_N < 2 Or _
+       ZSCORE_LONG_N < 2 Then
+
+        Err.Raise vbObjectError + 201, , _
+            "Z-score期間は2以上にしてください。"
+
+    End If
+
+    If HIGHLOW_SHORT_N < 1 Or _
+       HIGHLOW_LONG_N < 1 Then
+
+        Err.Raise vbObjectError + 202, , _
+            "High/Low期間は1以上にしてください。"
+
+    End If
+
+    If VOLATILITY_N < 2 Then
+
+        Err.Raise vbObjectError + 203, , _
+            "Volatility期間は2以上にしてください。"
+
+    End If
+
+    If REGRESSION_N < 3 Then
+
+        Err.Raise vbObjectError + 204, , _
+            "Regression期間は3以上にしてください。"
+
+    End If
+
+End Sub
+
+
+'========================================================
+' READ SOURCE SHEET
+'
+' dates(r):
+'   >0 : 有効日付
+'   =0 : 空白行・集計行
+'
+' 末尾集計行への対応を維持。
 '========================================================
 
 Private Sub ReadSheetData( _
@@ -635,159 +1531,96 @@ Private Sub ReadSheetData( _
 
     Dim dateValue As Variant
 
-
     lastCol = ws.Cells( _
         1, ws.Columns.Count).End(xlToLeft).Column
 
     lastRow = ws.Cells( _
         ws.rows.Count, 1).End(xlUp).Row
 
-
     If lastCol < 2 Then
 
         Err.Raise vbObjectError + 300, , _
-            "B列以降にデータ系列がありません。" & _
-            vbCrLf & _
-            "シート: " & ws.Name
+            "データ系列がありません: " & ws.Name
 
     End If
-
 
     If lastRow < 2 Then
 
         Err.Raise vbObjectError + 301, , _
-            "時系列データがありません。" & _
-            vbCrLf & _
-            "シート: " & ws.Name
+            "時系列データがありません: " & ws.Name
 
     End If
-
 
     If IsError(ws.Cells(1, 1).value2) Then
 
         Err.Raise vbObjectError + 302, , _
-            "日付ヘッダーがエラー値です。" & _
-            vbCrLf & _
-            "シート: " & ws.Name
+            "日付ヘッダーがエラーです: " & ws.Name
 
     End If
-
-
-    '--------------------------------------------
-    ' データを配列へ読み込む
-    '
-    ' dataBlock(1, 1) = シートA2
-    ' dataBlock(2, 1) = シートA3
-    '--------------------------------------------
 
     dataBlock = ws.Range( _
         ws.Cells(2, 1), _
         ws.Cells(lastRow, lastCol) _
     ).value2
 
-
     ReDim dates(1 To UBound(dataBlock, 1))
 
-
     previousDay = 0
-
     hasPreviousDate = False
     hasSummaryStarted = False
-
-
-    '====================================================
-    ' 日付列を走査
-    '====================================================
 
     For r = 1 To UBound(dataBlock, 1)
 
         dateValue = dataBlock(r, 1)
 
-
         If IsError(dateValue) Then
 
             Err.Raise vbObjectError + 303, , _
-                "日付列にエラー値があります。" & _
-                vbCrLf & _
-                "シート: " & ws.Name & vbCrLf & _
-                "行: " & CStr(r + 1)
+                "日付列にエラーがあります: " & _
+                ws.Name & " row " & CStr(r + 1)
 
         End If
 
-
         dayKey = ParseDateKey(dateValue)
 
-
         If dayKey > 0 Then
-
-
-            '----------------------------------------
-            ' 集計領域の後に日付が再登場した場合
-            '----------------------------------------
 
             If hasSummaryStarted Then
 
                 Err.Raise vbObjectError + 304, , _
-                    "集計行の後に日付が存在します。" & _
-                    vbCrLf & _
-                    "シート: " & ws.Name & vbCrLf & _
-                    "行: " & CStr(r + 1)
+                    "集計行の後に日付があります: " & _
+                    ws.Name & " row " & CStr(r + 1)
 
             End If
-
-
-            '----------------------------------------
-            ' 日付の昇順を確認
-            '
-            ' 数値系列の欠損とは独立に検証する。
-            '----------------------------------------
 
             If hasPreviousDate Then
 
                 If dayKey <= previousDay Then
 
                     Err.Raise vbObjectError + 305, , _
-                        "日付が昇順ではありません。" & _
-                        vbCrLf & _
-                        "シート: " & ws.Name & vbCrLf & _
-                        "行: " & CStr(r + 1)
+                        "日付が昇順ではありません: " & _
+                        ws.Name & " row " & CStr(r + 1)
 
                 End If
 
             End If
 
-
             dates(r) = dayKey
 
             previousDay = dayKey
-
             hasPreviousDate = True
-
 
         Else
 
-
-            '----------------------------------------
-            ' 日付ではない行
-            '
-            ' 空白行は除外する。
-            '
-            ' EOD_Chg等の文字列が存在する場合、
-            ' 以降を集計領域として扱う。
-            '----------------------------------------
-
             dates(r) = 0
-
 
             If Not IsBlankVariant(dateValue) Then
 
                 If Not hasPreviousDate Then
 
                     Err.Raise vbObjectError + 306, , _
-                        "日付データ開始前に文字列行があります。" & _
-                        vbCrLf & _
-                        "シート: " & ws.Name & vbCrLf & _
-                        "行: " & CStr(r + 1)
+                        "日付開始前に文字列行があります: " & _
+                        ws.Name
 
                 End If
 
@@ -799,13 +1632,10 @@ Private Sub ReadSheetData( _
 
     Next r
 
-
     If Not hasPreviousDate Then
 
         Err.Raise vbObjectError + 307, , _
-            "有効な日付データがありません。" & _
-            vbCrLf & _
-            "シート: " & ws.Name
+            "有効な日付データがありません: " & ws.Name
 
     End If
 
@@ -813,14 +1643,7 @@ End Sub
 
 
 '========================================================
-' 日付判定
-'
-' Excel日付シリアル値をキーとして使用する。
-'
-' 日付でなければ0を返す。
-'
-' 時刻部分は切り捨てる。
-'
+' PARSE DATE
 '========================================================
 
 Private Function ParseDateKey( _
@@ -828,52 +1651,30 @@ Private Function ParseDateKey( _
 ) As Long
 
     Dim numericDate As Double
-    Dim dayKey As Long
-
 
     ParseDateKey = 0
 
-
     If IsError(v) Then Exit Function
-
     If IsNull(v) Then Exit Function
-
     If IsEmpty(v) Then Exit Function
-
     If VarType(v) = vbBoolean Then Exit Function
-
-
-    '--------------------------------------------
-    ' 数値の日付シリアル値
-    '--------------------------------------------
 
     If IsNumeric(v) Then
 
         numericDate = CDbl(v)
 
-        If numericDate < 1 Then Exit Function
-
+        If numericDate < 1# Then Exit Function
         If numericDate > 2958465# Then Exit Function
 
-        dayKey = CLng(Fix(numericDate))
-
-        ParseDateKey = dayKey
+        ParseDateKey = CLng(Fix(numericDate))
 
         Exit Function
 
     End If
 
-
-    '--------------------------------------------
-    ' 文字列の日付
-    '--------------------------------------------
-
     If IsDate(v) Then
 
         numericDate = CDbl(CDate(v))
-
-        ' 1904日付システムのブックでは、
-        ' VBA日付からExcel日付へ変換する。
 
         If ThisWorkbook.Date1904 Then
 
@@ -881,8 +1682,7 @@ Private Function ParseDateKey( _
 
         End If
 
-        If numericDate < 1 Then Exit Function
-
+        If numericDate < 1# Then Exit Function
         If numericDate > 2958465# Then Exit Function
 
         ParseDateKey = CLng(Fix(numericDate))
@@ -893,26 +1693,12 @@ End Function
 
 
 '========================================================
-' 系列単位の有効観測抽出
+' BUILD SERIES DATA
 '
-' dataBlock:
-'   シート全体のデータ
+' series(1,i): 日付
+' series(2,i): 水準
 '
-' dates:
-'   各行の日付キー
-'
-' colNum:
-'   対象系列の列番号
-'
-' series(1, i):
-'   日付キー
-'
-' series(2, i):
-'   数値
-'
-' 欠損値があれば、その系列の当該行だけ除外する。
-'
-' 他の系列の有効観測には影響しない。
+' 欠損は系列ごとに処理。
 '========================================================
 
 Private Sub BuildSeriesData( _
@@ -927,35 +1713,18 @@ Private Sub BuildSeriesData( _
     Dim tempSeries() As Double
 
     Dim r As Long
-
     Dim v As Variant
 
-    Dim capacity As Long
-
-
-    capacity = UBound(dates)
-
-    ReDim tempSeries(1 To 2, 1 To capacity)
+    ReDim tempSeries(1 To 2, 1 To UBound(dates))
 
     seriesCount = 0
     skippedCount = 0
 
-
     For r = LBound(dates) To UBound(dates)
-
-
-        '--------------------------------------------
-        ' 日付ではない行は除外
-        '--------------------------------------------
 
         If dates(r) > 0 Then
 
             v = dataBlock(r, colNum)
-
-
-            '----------------------------------------
-            ' この系列の値だけを検証
-            '----------------------------------------
 
             If IsUsableNumericValue(v) Then
 
@@ -977,31 +1746,15 @@ Private Sub BuildSeriesData( _
 
     Next r
 
-
-    '====================================================
-    ' 有効データが存在しない系列
-    '
-    ' エラーにはしない。
-    '
-    ' 計算関数がNAを返す。
-    '====================================================
-
     If seriesCount = 0 Then
 
         series = Empty
-
         Exit Sub
 
     End If
 
-
-    '====================================================
-    ' 有効観測だけに縮小
-    '====================================================
-
     ReDim Preserve tempSeries( _
         1 To 2, 1 To seriesCount)
-
 
     series = tempSeries
 
@@ -1009,15 +1762,7 @@ End Sub
 
 
 '========================================================
-' 数値として利用できる値か判定
-'
-' False:
-'   Empty
-'   Null
-'   空文字列
-'   Excelエラー値
-'   非数値
-'
+' VALID NUMERIC
 '========================================================
 
 Private Function IsUsableNumericValue( _
@@ -1026,33 +1771,22 @@ Private Function IsUsableNumericValue( _
 
     IsUsableNumericValue = False
 
-
     If IsError(v) Then Exit Function
-
     If IsNull(v) Then Exit Function
-
     If IsEmpty(v) Then Exit Function
-
     If VarType(v) = vbBoolean Then Exit Function
-
 
     If Len(Trim$(CStr(v))) = 0 Then
         Exit Function
     End If
 
-
-    If Not IsNumeric(v) Then
-        Exit Function
-    End If
-
-
-    IsUsableNumericValue = True
+    IsUsableNumericValue = IsNumeric(v)
 
 End Function
 
 
 '========================================================
-' 空白値判定
+' BLANK VARIANT
 '========================================================
 
 Private Function IsBlankVariant( _
@@ -1084,9 +1818,7 @@ End Function
 
 
 '========================================================
-' Latest Level
-'
-' 最新の有効観測を使用
+' LATEST LEVEL
 '========================================================
 
 Private Function LatestLevel( _
@@ -1102,7 +1834,6 @@ Private Function LatestLevel( _
 
     End If
 
-
     LatestLevel = _
         series(2, seriesCount) * outputMultiplier
 
@@ -1110,10 +1841,7 @@ End Function
 
 
 '========================================================
-' N-observation Change
-'
-' 欠損値を除外した後の有効観測で計算する。
-'
+' N-OBSERVATION CHANGE
 '========================================================
 
 Private Function ChangeN( _
@@ -1130,22 +1858,17 @@ Private Function ChangeN( _
 
     End If
 
-
     ChangeN = _
-        ( _
-            series(2, seriesCount) _
-            - _
-            series(2, seriesCount - n) _
-        ) * outputMultiplier
+        (series(2, seriesCount) - _
+         series(2, seriesCount - n)) * outputMultiplier
 
 End Function
 
 
 '========================================================
-' Z-score
+' Z-SCORE
 '
-' 直近n個の有効なLevelを使用する。
-'
+' 最新N個の有効水準
 '========================================================
 
 Private Function ZScoreLevel( _
@@ -1161,9 +1884,6 @@ Private Function ZScoreLevel( _
     Dim sumSq As Double
     Dim sdVal As Double
 
-    Dim x As Double
-
-
     If seriesCount < n Then
 
         ZScoreLevel = "NA"
@@ -1171,16 +1891,7 @@ Private Function ZScoreLevel( _
 
     End If
 
-
     firstIndex = seriesCount - n + 1
-
-
-    '--------------------------------------------
-    ' Mean
-    '--------------------------------------------
-
-    avgVal = 0
-
 
     For i = firstIndex To seriesCount
 
@@ -1188,36 +1899,23 @@ Private Function ZScoreLevel( _
 
     Next i
 
-
     avgVal = avgVal / n
-
-
-    '--------------------------------------------
-    ' Sample standard deviation
-    '--------------------------------------------
-
-    sumSq = 0
-
 
     For i = firstIndex To seriesCount
 
-        x = series(2, i)
-
-        sumSq = sumSq + (x - avgVal) ^ 2
+        sumSq = sumSq + _
+            (series(2, i) - avgVal) ^ 2
 
     Next i
 
-
     sdVal = Sqr(sumSq / (n - 1))
 
-
-    If sdVal = 0 Then
+    If sdVal = 0# Then
 
         ZScoreLevel = "NA"
         Exit Function
 
     End If
-
 
     ZScoreLevel = _
         (series(2, seriesCount) - avgVal) / sdVal
@@ -1226,10 +1924,63 @@ End Function
 
 
 '========================================================
-' Volatility of daily changes
+' HIGH / LOW
 '
-' 直近n本の有効観測間の変化幅を使用する。
-'
+' 最新N個の有効水準の最大・最小
+'========================================================
+
+Private Function HighLowLevel( _
+    ByRef series As Variant, _
+    ByVal seriesCount As Long, _
+    ByVal n As Long, _
+    ByVal outputMultiplier As Double, _
+    ByVal isHigh As Boolean _
+) As Variant
+
+    Dim firstIndex As Long
+    Dim i As Long
+
+    Dim extremeValue As Double
+    Dim currentValue As Double
+
+    If seriesCount < n Then
+
+        HighLowLevel = "NA"
+        Exit Function
+
+    End If
+
+    firstIndex = seriesCount - n + 1
+
+    extremeValue = series(2, firstIndex)
+
+    For i = firstIndex + 1 To seriesCount
+
+        currentValue = series(2, i)
+
+        If isHigh Then
+
+            If currentValue > extremeValue Then
+                extremeValue = currentValue
+            End If
+
+        Else
+
+            If currentValue < extremeValue Then
+                extremeValue = currentValue
+            End If
+
+        End If
+
+    Next i
+
+    HighLowLevel = extremeValue * outputMultiplier
+
+End Function
+
+
+'========================================================
+' DAILY CHANGE VOLATILITY
 '========================================================
 
 Private Function VolDailyChange( _
@@ -1244,7 +1995,6 @@ Private Function VolDailyChange( _
     Dim i As Long
     Dim j As Long
 
-
     If seriesCount <= n Then
 
         VolDailyChange = "NA"
@@ -1252,11 +2002,9 @@ Private Function VolDailyChange( _
 
     End If
 
-
     ReDim changes(1 To n)
 
     j = 1
-
 
     For i = seriesCount - n + 1 To seriesCount
 
@@ -1267,7 +2015,6 @@ Private Function VolDailyChange( _
 
     Next i
 
-
     VolDailyChange = _
         StDevSampleArray(changes) * outputMultiplier
 
@@ -1275,7 +2022,7 @@ End Function
 
 
 '========================================================
-' Sample standard deviation
+' SAMPLE STANDARD DEVIATION
 '========================================================
 
 Private Function StDevSampleArray( _
@@ -1289,17 +2036,14 @@ Private Function StDevSampleArray( _
     Dim sumVal As Double
     Dim sumSq As Double
 
-
     n = UBound(arr) - LBound(arr) + 1
-
 
     If n < 2 Then
 
-        StDevSampleArray = 0
+        StDevSampleArray = 0#
         Exit Function
 
     End If
-
 
     For i = LBound(arr) To UBound(arr)
 
@@ -1307,9 +2051,7 @@ Private Function StDevSampleArray( _
 
     Next i
 
-
     avgVal = sumVal / n
-
 
     For i = LBound(arr) To UBound(arr)
 
@@ -1317,22 +2059,15 @@ Private Function StDevSampleArray( _
 
     Next i
 
-
     StDevSampleArray = Sqr(sumSq / (n - 1))
 
 End Function
 
 
 '========================================================
-' 回帰説明変数の変化幅辞書
+' EXPLANATORY CHANGE MAP
 '
-' Key:
-'   開始日|終了日
-'
-' Value:
-'   説明変数の変化幅
-'
-' 欠損値を除外した説明変数の系列から構築する。
+' Key: 開始日|終了日
 '========================================================
 
 Private Sub BuildChangeMap( _
@@ -1342,31 +2077,20 @@ Private Sub BuildChangeMap( _
 )
 
     Dim i As Long
-
     Dim key As String
-    Dim changeValue As Double
 
-
-    If seriesCount < 2 Then
-        Exit Sub
-    End If
-
+    If seriesCount < 2 Then Exit Sub
 
     For i = 2 To seriesCount
-
 
         key = DatePairKey( _
             CLng(series(1, i - 1)), _
             CLng(series(1, i)))
 
-
-        changeValue = _
-            series(2, i) - series(2, i - 1)
-
-
         If Not changeMap.Exists(key) Then
 
-            changeMap.Add key, changeValue
+            changeMap.Add key, _
+                series(2, i) - series(2, i - 1)
 
         End If
 
@@ -1376,11 +2100,7 @@ End Sub
 
 
 '========================================================
-' 日付区間キー
-'
-' 例：
-' 46280|46281
-'
+' DATE PAIR KEY
 '========================================================
 
 Private Function DatePairKey( _
@@ -1395,17 +2115,11 @@ End Function
 
 
 '========================================================
-' Cross-sheet regression
+' CROSS-SHEET REGRESSION
 '
-' y_t = alpha + beta*x_t + epsilon_t
+' y = alpha + beta*x + epsilon
 '
-' 被説明変数と説明変数の日付区間を照合する。
-'
-' 欠損によって日付区間が異なる変化幅は
-' 回帰に採用しない。
-'
-' 直近25個の対応する変化幅を使用する。
-'
+' 共通の日付区間の変化幅だけを使用。
 '========================================================
 
 Private Sub Regression25DailyChangeCrossSheet( _
@@ -1424,7 +2138,6 @@ Private Sub Regression25DailyChangeCrossSheet( _
     Dim j As Long
 
     Dim countObs As Long
-
     Dim key As String
 
     Dim xMean As Double
@@ -1441,75 +2154,33 @@ Private Sub Regression25DailyChangeCrossSheet( _
     Dim sigma2 As Double
     Dim seBeta As Double
 
-
     betaOut = "NA"
     r2Out = "NA"
     tValueOut = "NA"
 
-
-    '====================================================
-    ' 被説明変数のデータが不足
-    '====================================================
-
-    If targetCount <= REGRESSION_N Then
-        Exit Sub
-    End If
-
-
-    If xChangeMap.Count < REGRESSION_N Then
-        Exit Sub
-    End If
-
+    If targetCount <= REGRESSION_N Then Exit Sub
+    If xChangeMap.Count < REGRESSION_N Then Exit Sub
 
     ReDim x(1 To REGRESSION_N)
     ReDim y(1 To REGRESSION_N)
 
-
     countObs = 0
 
-
-    '====================================================
-    ' 被説明変数の最新観測から遡る
-    '====================================================
-
     For i = targetCount To 2 Step -1
-
-
-        '--------------------------------------------
-        ' 被説明変数側の変化幅の日付区間
-        '--------------------------------------------
 
         key = DatePairKey( _
             CLng(targetSeries(1, i - 1)), _
             CLng(targetSeries(1, i)))
 
-
-        '--------------------------------------------
-        ' 説明変数側に同じ区間が存在する場合
-        '--------------------------------------------
-
         If xChangeMap.Exists(key) Then
-
 
             countObs = countObs + 1
 
-
-            '----------------------------------------
-            ' X: 説明変数の変化幅
-            '----------------------------------------
-
             x(countObs) = CDbl(xChangeMap(key))
 
-
-            '----------------------------------------
-            ' Y: 被説明変数の変化幅
-            '----------------------------------------
-
             y(countObs) = _
-                targetSeries(2, i) _
-                - _
+                targetSeries(2, i) - _
                 targetSeries(2, i - 1)
-
 
             If countObs = REGRESSION_N Then
                 Exit For
@@ -1519,20 +2190,9 @@ Private Sub Regression25DailyChangeCrossSheet( _
 
     Next i
 
+    If countObs < REGRESSION_N Then Exit Sub
 
-    '====================================================
-    ' 25観測未満の場合
-    '====================================================
-
-    If countObs < REGRESSION_N Then
-        Exit Sub
-    End If
-
-
-    '====================================================
-    ' 平均
-    '====================================================
-
+    ' Means
     For j = 1 To REGRESSION_N
 
         xMean = xMean + x(j)
@@ -1540,19 +2200,13 @@ Private Sub Regression25DailyChangeCrossSheet( _
 
     Next j
 
-
     xMean = xMean / REGRESSION_N
     yMean = yMean / REGRESSION_N
 
-
-    '====================================================
-    ' 分散・共分散
-    '====================================================
-
+    ' Centered sums
     For j = 1 To REGRESSION_N
 
         sxx = sxx + (x(j) - xMean) ^ 2
-
         syy = syy + (y(j) - yMean) ^ 2
 
         sxy = sxy + _
@@ -1560,74 +2214,34 @@ Private Sub Regression25DailyChangeCrossSheet( _
 
     Next j
 
-
-    If sxx <= 0 Or syy <= 0 Then
-        Exit Sub
-    End If
-
-
-    '====================================================
-    ' Beta
-    '====================================================
+    If sxx <= 0# Or syy <= 0# Then Exit Sub
 
     beta = sxy / sxx
 
-
-    '====================================================
-    ' R-squared
-    '====================================================
-
     r2 = (sxy ^ 2) / (sxx * syy)
 
-    If r2 < 0 Then r2 = 0
-    If r2 > 1 Then r2 = 1
-
+    If r2 < 0# Then r2 = 0#
+    If r2 > 1# Then r2 = 1#
 
     betaOut = beta
     r2Out = r2
 
-
-    '====================================================
-    ' t-value
-    '
-    ' 自由度：25 - 2 = 23
-    '====================================================
-
     sse = syy - beta * sxy
 
-
-    ' 浮動小数点誤差への対応
-    If sse < 0 Then
+    If sse < 0# Then
 
         If Abs(sse) < 0.000000000001 Then
-
-            sse = 0
-
+            sse = 0#
         End If
 
     End If
 
-
-    If sse <= 0 Then
-
-        tValueOut = "NA"
-        Exit Sub
-
-    End If
-
+    If sse <= 0# Then Exit Sub
 
     sigma2 = sse / (REGRESSION_N - 2)
-
     seBeta = Sqr(sigma2 / sxx)
 
-
-    If seBeta = 0 Then
-
-        tValueOut = "NA"
-        Exit Sub
-
-    End If
-
+    If seBeta = 0# Then Exit Sub
 
     tValueOut = beta / seBeta
 
@@ -1635,7 +2249,7 @@ End Sub
 
 
 '========================================================
-' Worksheet取得
+' GET WORKSHEET
 '========================================================
 
 Private Function GetWorksheetOrError( _
@@ -1649,18 +2263,16 @@ Private Function GetWorksheetOrError( _
 
     Exit Function
 
-
 NotFound:
 
     Err.Raise vbObjectError + 600, , _
-        "指定されたシートが見つかりません: " & _
-        sheetName
+        "シートが見つかりません: " & sheetName
 
 End Function
 
 
 '========================================================
-' Worksheet作成・取得
+' GET OR CREATE WORKSHEET
 '========================================================
 
 Private Function GetOrCreateWorksheet( _
@@ -1669,13 +2281,11 @@ Private Function GetOrCreateWorksheet( _
 
     Dim ws As Worksheet
 
-
     On Error Resume Next
 
     Set ws = ThisWorkbook.Worksheets(sheetName)
 
     On Error GoTo 0
-
 
     If ws Is Nothing Then
 
@@ -1687,14 +2297,13 @@ Private Function GetOrCreateWorksheet( _
 
     End If
 
-
     Set GetOrCreateWorksheet = ws
 
 End Function
 
 
 '========================================================
-' ヘッダー検証
+' HEADER VALIDATION
 '========================================================
 
 Private Sub ValidateHeader( _
@@ -1706,21 +2315,19 @@ Private Sub ValidateHeader( _
 
     v = ws.Cells(1, colNum).value2
 
-
     If IsError(v) Then
 
         Err.Raise vbObjectError + 610, , _
-            "ヘッダーにエラー値があります。" & vbCrLf & _
+            "ヘッダーがエラーです: " & _
             ws.Name & "!" & _
             ws.Cells(1, colNum).Address(False, False)
 
     End If
 
-
     If IsBlankVariant(v) Then
 
         Err.Raise vbObjectError + 611, , _
-            "ヘッダーが空白です。" & vbCrLf & _
+            "ヘッダーが空白です: " & _
             ws.Name & "!" & _
             ws.Cells(1, colNum).Address(False, False)
 
@@ -1730,7 +2337,7 @@ End Sub
 
 
 '========================================================
-' 説明変数のヘッダー検索
+' FIND EXPLANATORY HEADER
 '========================================================
 
 Private Function FindHeaderColumnOrError( _
@@ -1740,28 +2347,22 @@ Private Function FindHeaderColumnOrError( _
 ) As Long
 
     Dim c As Long
-
-    Dim FoundCol As Long
-    Dim FoundCount As Long
+    Dim foundCol As Long
+    Dim foundCount As Long
 
     Dim h As String
     Dim v As Variant
-
 
     For c = 2 To lastCol
 
         v = ws.Cells(1, c).value2
 
-
         If IsError(v) Then
 
             Err.Raise vbObjectError + 620, , _
-                "ヘッダーにエラー値があります。" & vbCrLf & _
-                ws.Name & "!" & _
-                ws.Cells(1, c).Address(False, False)
+                "ヘッダーがエラーです: " & ws.Name
 
         End If
-
 
         If IsEmpty(v) Then
 
@@ -1773,49 +2374,45 @@ Private Function FindHeaderColumnOrError( _
 
         End If
 
-
         If StrComp( _
-            h, Trim$(headerName), vbTextCompare) = 0 Then
+            h, Trim$(headerName), _
+            vbTextCompare) = 0 Then
 
-            FoundCol = c
-            FoundCount = FoundCount + 1
+            foundCol = c
+            foundCount = foundCount + 1
 
         End If
 
     Next c
 
-
-    If FoundCount = 0 Then
+    If foundCount = 0 Then
 
         Err.Raise vbObjectError + 621, , _
-            "説明変数のヘッダーが見つかりません。" & _
-            vbCrLf & _
-            "シート: " & ws.Name & vbCrLf & _
-            "系列名: " & headerName
+            "説明変数が見つかりません: " & _
+            ws.Name & "!" & headerName
 
     End If
 
-
-    If FoundCount > 1 Then
+    If foundCount > 1 Then
 
         Err.Raise vbObjectError + 622, , _
-            "説明変数のヘッダーが重複しています。" & _
-            vbCrLf & _
-            "シート: " & ws.Name & vbCrLf & _
-            "系列名: " & headerName
+            "説明変数ヘッダーが重複しています: " & _
+            ws.Name & "!" & headerName
 
     End If
 
-
-    FindHeaderColumnOrError = FoundCol
+    FindHeaderColumnOrError = foundCol
 
 End Function
 
 
 '========================================================
-' Output Headers
+' OUTPUT HEADERS
 '
-' セルの書式は変更しない。
+' A:R
+'
+' ヘッダー文字列だけを書き込む。
+' セル書式・フィルター機能は変更しない。
 '========================================================
 
 Private Sub WriteHeaders( _
@@ -1825,26 +2422,25 @@ Private Sub WriteHeaders( _
     Dim headers As Variant
     Dim i As Long
 
-
     headers = Array( _
         "Sheet", _
         "Trade", _
         "Level", _
-        "1d-Chg", _
-        "5d-Chg", _
-        "25d-Chg", _
-        "5d-Zscore", _
-        "25d-Zscore", _
-        "60d-Zscore", _
-        "5d-vol", _
-        "25d-vol", _
-        "60d-vol", _
-        "25d-beta", _
+        CStr(CHANGE_1_N) & "d-Chg", _
+        CStr(CHANGE_5_N) & "d-Chg", _
+        CStr(CHANGE_25_N) & "d-Chg", _
+        CStr(ZSCORE_SHORT_N) & "d-Zscore", _
+        CStr(HIGHLOW_SHORT_N) & "d-High", _
+        CStr(HIGHLOW_SHORT_N) & "d-Low", _
+        CStr(ZSCORE_LONG_N) & "d-Zscore", _
+        CStr(HIGHLOW_LONG_N) & "d-High", _
+        CStr(HIGHLOW_LONG_N) & "d-Low", _
+        CStr(VOLATILITY_N) & "d-vol", _
+        CStr(REGRESSION_N) & "d-beta", _
         "R2", _
         "t-value", _
-        "Latest" _
-    )
-
+        "Latest", _
+        "Type")
 
     For i = LBound(headers) To UBound(headers)
 

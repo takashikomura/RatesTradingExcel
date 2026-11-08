@@ -1,0 +1,580 @@
+
+Option Explicit
+
+'==========================================================
+' JGB CHART DELETE MODULE
+'
+' Compatible with JGB Multi Chart Controller V3
+'
+' Public macros:
+'   DeleteSelectedJGBChart
+'   DeleteChart
+'   CreateJGBDeleteButton
+'
+' PlotData:
+'   4 columns per chart
+'   Row 1: chart ID
+'
+' Existing charts and names belonging to other IDs
+' are not modified.
+'==========================================================
+
+Private Const DEL_DASH As String = "Dashboard"
+Private Const DEL_PLOT As String = "PlotData"
+
+Private Const DEL_CHART_PREFIX As String = "JGBChart_"
+Private Const DEL_NAME_PREFIX As String = "JGB_"
+
+Private Const DEL_BLOCK_WIDTH As Long = 4
+
+'==========================================================
+' 1. MAIN DELETE PROCEDURE
+'==========================================================
+Public Sub DeleteSelectedJGBChart()
+
+    Dim wsDash As Worksheet
+    Dim wsPlot As Worksheet
+
+    Dim chartID As String
+    Dim blockCol As Long
+
+    Dim co As chartObject
+
+    Dim oldScreen As Boolean
+    Dim oldEvents As Boolean
+
+    Dim answer As VbMsgBoxResult
+
+    Dim deletedNames As Long
+    Dim completed As Boolean
+
+    On Error GoTo ErrorHandler
+
+    Set wsDash = ThisWorkbook.Worksheets(DEL_DASH)
+    Set wsPlot = ThisWorkbook.Worksheets(DEL_PLOT)
+
+    '----------------------------------------------
+    ' Identify target chart
+    '----------------------------------------------
+    chartID = DelJGB_GetSelectedID(wsDash, wsPlot)
+
+    If Len(chartID) = 0 Then
+
+        MsgBox _
+            "削除対象が選択されていません。" & vbCrLf & _
+            "Dashboardの設定パネル内のセルを選択してください。", _
+            vbInformation, "Delete JGB Chart"
+
+        Exit Sub
+
+    End If
+
+    blockCol = DelJGB_FindBlock(wsPlot, chartID)
+
+    If blockCol = 0 Then
+
+        MsgBox _
+            "PlotDataにチャートIDが見つかりません: " & chartID, _
+            vbExclamation
+
+        Exit Sub
+
+    End If
+
+    '----------------------------------------------
+    ' Confirmation
+    '----------------------------------------------
+    answer = MsgBox( _
+        "チャート " & chartID & " を削除しますか？" & _
+        vbCrLf & vbCrLf & _
+        "削除対象:" & vbCrLf & _
+        "・チャート本体" & vbCrLf & _
+        "・Dashboardの設定パネル" & vbCrLf & _
+        "・PlotDataの専用データ領域" & vbCrLf & _
+        "・関連する名前定義" & vbCrLf & vbCrLf & _
+        "他シートで名前定義を参照している数式も" & _
+        "影響を受けます。", _
+        vbYesNo + vbQuestion + vbDefaultButton2, _
+        "Delete " & chartID)
+
+    If answer <> vbYes Then Exit Sub
+
+    oldScreen = Application.ScreenUpdating
+    oldEvents = Application.EnableEvents
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    '----------------------------------------------
+    ' Delete chart object
+    '----------------------------------------------
+    Set co = Nothing
+
+    On Error Resume Next
+    Set co = wsDash.ChartObjects( _
+        DEL_CHART_PREFIX & chartID)
+    On Error GoTo ErrorHandler
+
+    If Not co Is Nothing Then
+        co.Delete
+    End If
+
+    '----------------------------------------------
+    ' Clear configuration panel and moved cells
+    '----------------------------------------------
+    DelJGB_ClearConfiguration wsDash, chartID
+
+    '----------------------------------------------
+    ' Clear only the corresponding PlotData block
+    '----------------------------------------------
+    DelJGB_ClearPlotBlock wsPlot, blockCol
+
+    '----------------------------------------------
+    ' Delete associated workbook names
+    '----------------------------------------------
+    deletedNames = DelJGB_RemoveNames(chartID)
+
+    completed = True
+
+CleanExit:
+
+    Application.EnableEvents = oldEvents
+    Application.ScreenUpdating = oldScreen
+
+    If completed Then
+
+        MsgBox _
+            chartID & " を削除しました。" & vbCrLf & _
+            "削除した名前定義: " & deletedNames & " 件", _
+            vbInformation, "Delete JGB Chart"
+
+    End If
+
+    Exit Sub
+
+ErrorHandler:
+
+    Dim errorText As String
+
+    errorText = Err.Description
+
+    If Not completed Then
+
+        MsgBox _
+            "削除処理中にエラーが発生しました。" & vbCrLf & _
+            errorText & vbCrLf & _
+            "削除が一部のみ完了した可能性があります。", _
+            vbExclamation
+
+    End If
+
+    Resume CleanExit
+
+End Sub
+
+' Existing button-friendly alias
+Public Sub DeleteChart()
+    DeleteSelectedJGBChart
+End Sub
+
+'==========================================================
+' 2. DETERMINE THE SELECTED CHART ID
+'
+' Supported:
+'   A. Selected embedded chart
+'   B. Selected configuration panel cell
+'   C. ActiveCell retained after clicking a macro button
+'==========================================================
+Private Function DelJGB_GetSelectedID( _
+    ByVal wsDash As Worksheet, _
+    ByVal wsPlot As Worksheet) As String
+
+    Dim ac As Chart
+    Dim co As chartObject
+
+    Dim id As String
+    Dim candidate As Range
+
+    Dim c As Long
+    Dim lastCol As Long
+
+    '----------------------------------------------
+    ' A. Active embedded chart
+    '----------------------------------------------
+    On Error Resume Next
+    Set ac = ActiveChart
+
+    If Not ac Is Nothing Then
+        Set co = ac.Parent
+    End If
+
+    On Error GoTo 0
+
+    If Not co Is Nothing Then
+
+        If co.Parent Is wsDash Then
+
+            If Left$(co.Name, Len(DEL_CHART_PREFIX)) = _
+                DEL_CHART_PREFIX Then
+
+                id = mid$(co.Name, _
+                    Len(DEL_CHART_PREFIX) + 1)
+
+                If DelJGB_ValidID(id) Then
+
+                    DelJGB_GetSelectedID = id
+                    Exit Function
+
+                End If
+
+            End If
+
+        End If
+
+    End If
+
+    '----------------------------------------------
+    ' B. Selected worksheet cell
+    '----------------------------------------------
+    If Not ActiveSheet Is wsDash Then Exit Function
+
+    If TypeName(Selection) = "Range" Then
+
+        Set candidate = Selection
+
+    Else
+
+        Set candidate = ActiveCell
+
+    End If
+
+    If candidate Is Nothing Then Exit Function
+
+    lastCol = wsPlot.Cells( _
+        1, wsPlot.Columns.Count).End(xlToLeft).Column
+
+    For c = 1 To lastCol Step DEL_BLOCK_WIDTH
+
+        id = Trim$(CStr(wsPlot.Cells(1, c).value2))
+
+        If DelJGB_ValidID(id) Then
+
+            If DelJGB_IsSelectedConfig(id, candidate) Then
+
+                DelJGB_GetSelectedID = id
+                Exit Function
+
+            End If
+
+        End If
+
+    Next c
+
+End Function
+
+'==========================================================
+' 3. CHECK IF SELECTION BELONGS TO CONFIGURATION
+'==========================================================
+Private Function DelJGB_IsSelectedConfig( _
+    ByVal id As String, _
+    ByVal selectedRange As Range) As Boolean
+
+    Dim fields As Variant
+    Dim f As Variant
+
+    Dim r As Range
+
+    fields = Array( _
+        "Panel", "Type", "S1", _
+        "S2", "Period", "Status")
+
+    For Each f In fields
+
+        Set r = DelJGB_GetNamedRange( _
+            id, CStr(f))
+
+        If Not r Is Nothing Then
+
+            If r.Worksheet Is selectedRange.Worksheet Then
+
+                If Not Intersect( _
+                    r, selectedRange) Is Nothing Then
+
+                    DelJGB_IsSelectedConfig = True
+                    Exit Function
+
+                End If
+
+            End If
+
+        End If
+
+    Next f
+
+End Function
+
+'==========================================================
+' 4. GET CONFIGURATION RANGE
+'==========================================================
+Private Function DelJGB_GetNamedRange( _
+    ByVal id As String, _
+    ByVal field As String) As Range
+
+    Dim nameText As String
+
+    nameText = DEL_NAME_PREFIX & id & "_" & field
+
+    On Error Resume Next
+
+    Set DelJGB_GetNamedRange = _
+        ThisWorkbook.names(nameText).RefersToRange
+
+    On Error GoTo 0
+
+End Function
+
+'==========================================================
+' 5. CLEAR CONFIGURATION CELLS
+'
+' Supports individually moved parameter cells.
+' Does not alter column widths or row heights.
+'==========================================================
+Private Sub DelJGB_ClearConfiguration( _
+    ByVal wsDash As Worksheet, _
+    ByVal id As String)
+
+    Dim fields As Variant
+    Dim f As Variant
+    Dim r As Range
+
+    fields = Array( _
+        "Panel", "Type", "S1", _
+        "S2", "Period", "Status")
+
+    For Each f In fields
+
+        Set r = DelJGB_GetNamedRange( _
+            id, CStr(f))
+
+        If Not r Is Nothing Then
+
+            If r.Worksheet Is wsDash Then
+
+                If CStr(f) = "Panel" Then
+
+                    ' Original 6-row x 2-column panel.
+                    r.Clear
+
+                ElseIf r.Cells.CountLarge = 1 Then
+
+                    ' Clear a moved parameter cell.
+                    r.Clear
+
+                End If
+
+            End If
+
+        End If
+
+    Next f
+
+End Sub
+
+'==========================================================
+' 6. CLEAR PLOTDATA BLOCK
+'
+' Clear exactly four columns:
+'   Date / Series1 / Series2 / Metadata
+'
+' Do not delete entire worksheet columns.
+'==========================================================
+Private Sub DelJGB_ClearPlotBlock( _
+    ByVal ws As Worksheet, _
+    ByVal blockCol As Long)
+
+    Dim c As Long
+    Dim lastRow As Long
+    Dim currentLast As Long
+
+    lastRow = 1
+
+    For c = blockCol To blockCol + DEL_BLOCK_WIDTH - 1
+
+        currentLast = ws.Cells( _
+            ws.rows.Count, c).End(xlUp).Row
+
+        If currentLast > lastRow Then
+            lastRow = currentLast
+        End If
+
+    Next c
+
+    ws.Range( _
+        ws.Cells(1, blockCol), _
+        ws.Cells(lastRow, blockCol + DEL_BLOCK_WIDTH - 1)) _
+        .Clear
+
+End Sub
+
+'==========================================================
+' 7. DELETE ALL RELATED NAMES
+'
+' Includes both configuration and PlotData names:
+'
+' JGB_JG0001_Panel
+' JGB_JG0001_Type
+' JGB_JG0001_S1
+' JGB_JG0001_S2
+' JGB_JG0001_Period
+' JGB_JG0001_Status
+'
+' JGB_JG0001_Dates
+' JGB_JG0001_Data_S1
+' JGB_JG0001_Data_S2
+' JGB_JG0001_StartDate
+' JGB_JG0001_EndDate
+' JGB_JG0001_S1_Label
+' JGB_JG0001_S2_Label
+'==========================================================
+Private Function DelJGB_RemoveNames( _
+    ByVal id As String) As Long
+
+    Dim i As Long
+
+    Dim nameText As String
+    Dim localName As String
+    Dim prefix As String
+
+    Dim pos As Long
+
+    prefix = LCase$(DEL_NAME_PREFIX & id & "_")
+
+    For i = ThisWorkbook.names.Count To 1 Step -1
+
+        nameText = ThisWorkbook.names(i).Name
+
+        ' Remove worksheet scope prefix, if present.
+        pos = InStrRev(nameText, "!")
+
+        If pos > 0 Then
+
+            localName = mid$(nameText, pos + 1)
+
+        Else
+
+            localName = nameText
+
+        End If
+
+        If LCase$(Left$( _
+            localName, Len(prefix))) = prefix Then
+
+            ThisWorkbook.names(i).Delete
+
+            DelJGB_RemoveNames = _
+                DelJGB_RemoveNames + 1
+
+        End If
+
+    Next i
+
+End Function
+
+'==========================================================
+' 8. FIND PLOTDATA BLOCK
+'==========================================================
+Private Function DelJGB_FindBlock( _
+    ByVal ws As Worksheet, _
+    ByVal id As String) As Long
+
+    Dim c As Long
+    Dim lastCol As Long
+
+    lastCol = ws.Cells( _
+        1, ws.Columns.Count).End(xlToLeft).Column
+
+    For c = 1 To lastCol Step DEL_BLOCK_WIDTH
+
+        If StrComp( _
+            Trim$(CStr(ws.Cells(1, c).value2)), _
+            id, vbTextCompare) = 0 Then
+
+            DelJGB_FindBlock = c
+            Exit Function
+
+        End If
+
+    Next c
+
+End Function
+
+'==========================================================
+' 9. VALIDATE CHART ID
+'==========================================================
+Private Function DelJGB_ValidID( _
+    ByVal id As String) As Boolean
+
+    DelJGB_ValidID = (id Like "JG####")
+
+End Function
+
+'==========================================================
+' 10. OPTIONAL: CREATE DELETE BUTTON
+'
+' Select the desired cell on Dashboard and run this once.
+' The button can be freely moved afterward.
+'==========================================================
+Public Sub CreateJGBDeleteButton()
+
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim p As Range
+
+    Set ws = ThisWorkbook.Worksheets(DEL_DASH)
+
+    If Not ActiveSheet Is ws Then
+
+        MsgBox "Dashboard上の配置先セルを選択してください。", _
+            vbInformation
+
+        Exit Sub
+
+    End If
+
+    Set p = ActiveCell
+
+    On Error Resume Next
+    Set shp = ws.Shapes("btnJGBDelete")
+    On Error GoTo 0
+
+    If shp Is Nothing Then
+
+        Set shp = ws.Shapes.AddShape( _
+            msoShapeRoundedRectangle, _
+            p.Left, p.Top, 110, 30)
+
+        shp.Name = "btnJGBDelete"
+
+    End If
+
+    With shp
+
+        .OnAction = "'" & _
+            Replace(ThisWorkbook.Name, "'", "''") & _
+            "'!DeleteSelectedJGBChart"
+
+        .TextFrame.Characters.text = "DeleteChart"
+
+        .Fill.ForeColor.RGB = RGB(150, 45, 45)
+        .Line.Visible = msoFalse
+
+        .TextFrame.Characters.Font.Color = vbWhite
+        .TextFrame.Characters.Font.Bold = True
+
+        .Placement = xlFreeFloating
+
+    End With
+
+End Sub
+
+

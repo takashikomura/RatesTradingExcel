@@ -317,6 +317,7 @@ End Function
 ' even if Cov and V use different estimation windows.
 '==========================================================
 
+
 Public Function PCAVaRAllocate( _
     ByVal Cov As Range, _
     ByVal b As Range, _
@@ -329,6 +330,8 @@ Public Function PCAVaRAllocate( _
         Cov, b, EigenMatrix, T, z, False, False)
 
 End Function
+
+
 
 
 '==========================================================
@@ -356,6 +359,118 @@ Public Function PCAVaRDebug( _
 
     PCAVaRDebug = Risk_PCAVaRCore( _
         Cov, b, EigenMatrix, T, z, True, True)
+
+End Function
+
+'==========================================================
+' PCTradeExposure
+'
+' Signed PCA Exposure by Base Trade
+'
+' E(k,i) = x(k) * (V' * T)(i,k)
+'
+' x = T^(-1) * b
+'
+' INPUT:
+'   EigenMatrix : n x n (Tenor x PC)
+'   T           : n x n (Tenor x Base Trade)
+'   b           : n x 1 or 1 x n (Signed BPV)
+'
+' OUTPUT:
+'   Rows    = Base Trades
+'   Columns = PC1, PC2, ..., PCn
+'
+' Row sum does NOT represent total BPV.
+' Column sum = Portfolio PCA Exposure.
+'==========================================================
+
+Public Function PCTradeExposure( _
+    ByVal EigenMatrix As Range, _
+    ByVal T As Range, _
+    ByVal b As Range _
+) As Variant
+
+    On Error GoTo Failed
+
+    Dim n As Long
+    Dim i As Long, k As Long
+
+    Dim v As Variant
+    Dim tm As Variant
+    Dim bv As Variant
+
+    Dim x As Variant
+    Dim L As Variant
+
+    Dim output() As Variant
+
+    '--------------------------------------------
+    ' 1. Validate dimensions
+    '--------------------------------------------
+
+    n = T.rows.Count
+
+    If n < 2 Or T.Columns.Count <> n Then
+        Err.Raise RISK_INPUT_ERROR
+    End If
+
+    If EigenMatrix.rows.Count <> n Or _
+       EigenMatrix.Columns.Count <> n Then
+        Err.Raise RISK_INPUT_ERROR
+    End If
+
+    '--------------------------------------------
+    ' 2. Read inputs
+    '--------------------------------------------
+
+    tm = Risk_ReadMatrix(T)
+    bv = Risk_ReadBPV(b, n)
+    v = Risk_ReadMatrix(EigenMatrix)
+
+    '--------------------------------------------
+    ' 3. Trade exposure
+    '
+    ' x = T^(-1) * b
+    '--------------------------------------------
+
+    x = Risk_SolveTrade(tm, bv)
+
+    '--------------------------------------------
+    ' 4. PCA loading matrix
+    '
+    ' L = V' * T
+    '
+    ' L: PC x Trade
+    '--------------------------------------------
+
+    L = Risk_MM(Risk_Transpose(v), tm)
+
+    '--------------------------------------------
+    ' 5. Signed PCA Exposure
+    '
+    ' E(k,i) = x(k) * L(i,k)
+    '
+    ' Output: Trade x PC
+    '--------------------------------------------
+
+    ReDim output(1 To n, 1 To n)
+
+    For k = 1 To n
+
+        For i = 1 To n
+
+            output(k, i) = _
+                x(k, 1) * L(i, k)
+
+        Next i
+
+    Next k
+
+    PCTradeExposure = output
+    Exit Function
+
+Failed:
+    PCTradeExposure = Risk_ErrorToExcel(Err.Number)
 
 End Function
 
@@ -710,11 +825,11 @@ End Function
 '==========================================================
 
 Private Function Risk_MM( _
-    ByVal A As Variant, _
+    ByVal a As Variant, _
     ByVal b As Variant _
 ) As Variant
 
-    Risk_MM = Application.WorksheetFunction.MMult(A, b)
+    Risk_MM = Application.WorksheetFunction.MMult(a, b)
 
 End Function
 
@@ -729,7 +844,7 @@ End Function
 '==========================================================
 
 Private Function Risk_Transpose( _
-    ByVal A As Variant _
+    ByVal a As Variant _
 ) As Variant
 
     Dim nr As Long
@@ -740,8 +855,8 @@ Private Function Risk_Transpose( _
 
     Dim output() As Double
 
-    nr = UBound(A, 1)
-    nc = UBound(A, 2)
+    nr = UBound(a, 1)
+    nc = UBound(a, 2)
 
     ReDim output(1 To nc, 1 To nr)
 
@@ -749,7 +864,7 @@ Private Function Risk_Transpose( _
 
         For j = 1 To nc
 
-            output(j, i) = CDbl(A(i, j))
+            output(j, i) = CDbl(a(i, j))
 
         Next j
 
